@@ -1,0 +1,24 @@
+name: Server
+
+on:
+  push:
+    branches: [main]
+    paths: ["server/**", "examples/**"]
+  pull_request:
+    paths: ["server/**", "examples/**"]
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run check
+      - run: npm test

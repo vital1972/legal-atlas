@@ -1,0 +1,13 @@
+name = "legal-atlas"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+GRADER_MODEL = "claude-haiku-5-5"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "legal-atlas"
+# Замените на id из вывода `npx wrangler d1 create legal-atlas` (см. SETUP.md).
+database_id = "REPLACE_WITH_DATABASE_ID"
