@@ -8,10 +8,10 @@ compatibility_flags = ["nodejs_compat"]
 # Ключ задаётся секретом ANTHROPIC_API_KEY или DEEPSEEK_API_KEY.
 # Модель можно переопределить переменной GRADER_MODEL; по умолчанию
 # claude-haiku-5-5 для Claude и deepseek-chat для DeepSeek.
-GRADER_PROVIDER = "anthropic"
+GRADER_PROVIDER = "deepseek"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "legal-atlas"
 # Замените на id из вывода `npx wrangler d1 create legal-atlas` (см. SETUP.md).
-database_id = "REPLACE_WITH_DATABASE_ID"
+database_id = "e9552694-7124-497e-923c-ef0a0ed15322"
