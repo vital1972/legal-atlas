@@ -1,9 +1,12 @@
 package legalatlas.app.ui
 
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.sp
@@ -47,5 +50,8 @@ private val typography = Typography(
 
 @Composable
 fun AtlasTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = colors, typography = typography, content = content)
+    MaterialTheme(colorScheme = colors, typography = typography) {
+        // Без Surface цвет текста и значков по умолчанию чёрный: заголовок и шестерёнка сливаются с тёмным фоном.
+        Surface(modifier = Modifier.fillMaxSize(), color = AtlasColors.Night, contentColor = AtlasColors.Text, content = content)
+    }
 }
