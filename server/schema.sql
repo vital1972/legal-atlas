@@ -1,0 +1,15 @@
+CREATE TABLE IF NOT EXISTS decks (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  json TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS reviews (
+  id TEXT PRIMARY KEY,
+  item_id TEXT NOT NULL,
+  ts INTEGER NOT NULL,
+  payload TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS reviews_ts ON reviews (ts);
