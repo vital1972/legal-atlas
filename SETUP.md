@@ -12,7 +12,12 @@
 
 ## 2. Сервер на Cloudflare (бесплатно)
 
-Понадобятся: Node.js 20+ на ноутбуке, бесплатный аккаунт [Cloudflare](https://dash.cloudflare.com/sign-up) и ключ API Anthropic ([console.anthropic.com](https://console.anthropic.com) → API Keys; оценка одного ответа стоит доли цента).
+Понадобятся: Node.js 20+ на ноутбуке, бесплатный аккаунт [Cloudflare](https://dash.cloudflare.com/sign-up) и ключ API одного из оценщиков:
+
+- Claude: [console.anthropic.com](https://console.anthropic.com) → API Keys, секрет `ANTHROPIC_API_KEY`;
+- DeepSeek: [platform.deepseek.com](https://platform.deepseek.com) → API keys, секрет `DEEPSEEK_API_KEY`, и в `server/wrangler.toml` поставьте `GRADER_PROVIDER = "deepseek"`.
+
+Оценка одного ответа у обоих стоит доли цента.
 
 В терминале, в папке проекта:
 
@@ -28,7 +33,7 @@ npx wrangler d1 create legal-atlas      # создаст базу; скопир�
 ```bash
 npx wrangler d1 execute legal-atlas --remote --file=schema.sql
 npx wrangler secret put APP_TOKEN          # придумайте длинный пароль: им пользуются приложение и страница загрузки
-npx wrangler secret put ANTHROPIC_API_KEY  # вставьте ключ Anthropic
+npx wrangler secret put ANTHROPIC_API_KEY  # или DEEPSEEK_API_KEY, смотря кого выбрали
 npx wrangler deploy
 ```
 
@@ -45,4 +50,4 @@ npx wrangler deploy
 3. Занимайтесь сессиями по 10, 20 или 30 минут. Пропуски не страшны: приложение само расставит приоритеты.
 4. Раз в неделю скачайте отчёт и попросите Claude доработать колоду под слабые места (промпт там же).
 
-Модель оценщика задаётся в `server/wrangler.toml` (`GRADER_MODEL`, сейчас `claude-haiku-5-5`).
+Оценщик выбирается в `server/wrangler.toml`: `GRADER_PROVIDER` (`anthropic` или `deepseek`) и при желании `GRADER_MODEL` (по умолчанию `claude-haiku-5-5` и `deepseek-chat`). Какой оценщик включён, видно по адресу `/api/health`.
