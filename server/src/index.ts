@@ -1,13 +1,20 @@
-import { grade, type GradeRequest } from "./grade";
+import { grade, type GradeRequest, type Provider } from "./grade";
 import { UPLOAD_PAGE } from "./page";
 import { validateDeck } from "./validate";
 
 export interface Env {
   DB: D1Database;
   APP_TOKEN: string;
-  ANTHROPIC_API_KEY: string;
-  GRADER_MODEL: string;
+  ANTHROPIC_API_KEY?: string;
+  DEEPSEEK_API_KEY?: string;
+  GRADER_PROVIDER?: string;
+  GRADER_MODEL?: string;
 }
+
+const DEFAULT_MODELS: Record<Provider, string> = {
+  anthropic: "claude-haiku-5-5",
+  deepseek: "deepseek-chat",
+};
 
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -41,7 +48,7 @@ export default {
     if (route === "GET /") {
       return new Response(UPLOAD_PAGE, { headers: { "content-type": "text/html; charset=utf-8" } });
     }
-    if (route === "GET /api/health") return json({ ok: true });
+    if (route === "GET /api/health") return json({ ok: true, grader: env.GRADER_PROVIDER === "deepseek" ? "deepseek" : "anthropic" });
     if (!url.pathname.startsWith("/api/")) return json({ error: "not found" }, 404);
     if (!authorized(req, env)) return json({ error: "Неверный ключ доступа" }, 401);
 
@@ -80,9 +87,13 @@ export default {
       case "POST /api/grade": {
         const body = (await readJson(req)) as GradeRequest | undefined;
         if (!body?.item?.prompt || typeof body.answer !== "string") return json({ error: "Нужны item и answer" }, 400);
-        if (!env.ANTHROPIC_API_KEY) return json({ error: "На сервере не задан ANTHROPIC_API_KEY" }, 503);
+        const provider: Provider = env.GRADER_PROVIDER === "deepseek" ? "deepseek" : "anthropic";
+        const apiKey = provider === "deepseek" ? env.DEEPSEEK_API_KEY : env.ANTHROPIC_API_KEY;
+        if (!apiKey) {
+          return json({ error: `На сервере не задан ${provider === "deepseek" ? "DEEPSEEK_API_KEY" : "ANTHROPIC_API_KEY"}` }, 503);
+        }
         try {
-          const result = await grade(env.ANTHROPIC_API_KEY, env.GRADER_MODEL, {
+          const result = await grade(provider, apiKey, env.GRADER_MODEL || DEFAULT_MODELS[provider], {
             item: {
               prompt: body.item.prompt,
               answer: body.item.answer,

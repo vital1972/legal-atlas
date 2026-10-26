@@ -4,7 +4,11 @@ compatibility_date = "2026-10-01"
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
-GRADER_MODEL = "claude-haiku-5-5"
+# Кто оценивает свободные ответы: "anthropic" (Claude) или "deepseek".
+# Ключ задаётся секретом ANTHROPIC_API_KEY или DEEPSEEK_API_KEY.
+# Модель можно переопределить переменной GRADER_MODEL; по умолчанию
+# claude-haiku-5-5 для Claude и deepseek-chat для DeepSeek.
+GRADER_PROVIDER = "anthropic"
 
 [[d1_databases]]
 binding = "DB"
