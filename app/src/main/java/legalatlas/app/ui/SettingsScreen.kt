@@ -170,13 +170,19 @@ fun SettingsScreen(vm: AtlasViewModel) {
                 TextButton(onClick = { vm.deleteDeck(d.deck.id) }) { Text("Удалить") }
             }
         }
-        OutlinedButton(onClick = { picker.launch(arrayOf("application/json", "text/plain", "*/*")) }, modifier = Modifier.fillMaxWidth()) {
-            Text("Загрузить файл JSON")
+        OutlinedButton(onClick = { picker.launch(arrayOf("application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/rtf", "text/rtf", "text/plain", "application/json", "*/*")) }, modifier = Modifier.fillMaxWidth()) {
+            Text("Документ или файл колоды")
         }
+        Button(onClick = vm::openRework, modifier = Modifier.fillMaxWidth()) { Text("Переработать колоды по результатам") }
         OutlinedButton(onClick = vm::importSample, modifier = Modifier.fillMaxWidth()) { Text("Загрузить пример") }
         if (state.flaggedItems.isNotEmpty()) {
             OutlinedButton(onClick = vm::unflagAll, modifier = Modifier.fillMaxWidth()) {
                 Text("Вернуть отмеченные вопросы (${state.flaggedItems.size})")
+            }
+        }
+        if (state.retiredItems.isNotEmpty()) {
+            OutlinedButton(onClick = vm::restoreRetired, modifier = Modifier.fillMaxWidth()) {
+                Text("Вернуть убранные лёгкие вопросы (${state.retiredItems.size})")
             }
         }
 

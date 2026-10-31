@@ -141,6 +141,8 @@ data class AppState(
     val logs: List<ReviewLog> = emptyList(),
     val unlockedTopics: Set<String> = emptySet(),
     val flaggedItems: Set<String> = emptySet(),
+    /** Вопросы, которые даются легко и убраны из повторений при переработке колоды. */
+    val retiredItems: Set<String> = emptySet(),
     /** Обоснования, которые пользователь сохранил как свой эталон, по id вопроса. */
     val myRationales: Map<String, String> = emptyMap(),
     val settings: Settings = Settings(),

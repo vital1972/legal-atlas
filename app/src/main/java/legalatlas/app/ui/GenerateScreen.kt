@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlin.math.roundToInt
 import legalatlas.app.AtlasViewModel
+import legalatlas.app.GenMode
 import legalatlas.app.GenUi
 import legalatlas.core.Candidate
 import legalatlas.core.Formats
@@ -57,9 +58,13 @@ fun GenerateScreen(vm: AtlasViewModel) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
             }
             Column(Modifier.weight(1f)) {
-                Text("Колода из документа", style = MaterialTheme.typography.titleLarge)
                 Text(
-                    "«${g.docTitle}» · ${"%,d".format(g.text.length).replace(',', ' ')} знаков",
+                    if (g.mode == GenMode.DEEPEN) "Углубление трудных вопросов" else "Колода из документа",
+                    style = MaterialTheme.typography.titleLarge,
+                )
+                Text(
+                    if (g.mode == GenMode.DEEPEN) "Трудных вопросов: ${g.weak.size}"
+                    else "«${g.docTitle}» · ${"%,d".format(g.text.length).replace(',', ' ')} знаков",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -69,6 +74,10 @@ fun GenerateScreen(vm: AtlasViewModel) {
         when {
             g.running -> Running(g)
             g.candidates.isNotEmpty() -> Preview(vm, g)
+            g.mode == GenMode.DEEPEN -> Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                g.error?.let { Text(it, color = AtlasColors.Alert) }
+                Button(onClick = vm::generate, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("Попробовать ещё раз") }
+            }
             else -> Setup(vm, g)
         }
     }
@@ -120,7 +129,7 @@ private fun Running(g: GenUi) {
 
 @Composable
 private fun Preview(vm: AtlasViewModel, g: GenUi) {
-    val unverified = g.candidates.count { !it.quoteVerified }
+    val unverified = g.candidates.count { !it.quoteVerified && it.quoteRequired }
     val dups = g.candidates.count { it.duplicateOf != null }
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -128,7 +137,7 @@ private fun Preview(vm: AtlasViewModel, g: GenUi) {
                 "Предложено ${g.candidates.size}, выбрано ${g.selected.size}. " +
                     (if (unverified > 0) "Цитата не найдена в документе: $unverified. " else "") +
                     (if (dups > 0) "Похожи на уже имеющиеся: $dups. " else "") +
-                    "Такие вопросы сняты, отметьте их сами, если считаете верными.",
+                    (if (unverified + dups > 0) "Такие вопросы сняты, отметьте их сами, если считаете верными." else ""),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -184,8 +193,11 @@ private fun CandidateRow(c: Candidate, checked: Boolean, onToggle: () -> Unit) {
                 if (c.item.pretest) "разведка" else null,
             ).joinToString(" · ")
             Text(tags, style = MaterialTheme.typography.labelMedium, color = AtlasColors.Muted)
-            if (c.quoteVerified) Text("✓ цитата найдена в документе", style = MaterialTheme.typography.labelMedium, color = AtlasColors.Good)
-            else Text("✗ цитата не найдена в документе: проверьте ответ", style = MaterialTheme.typography.labelMedium, color = AtlasColors.Alert)
+            when {
+                c.quoteVerified -> Text("✓ цитата найдена в документе", style = MaterialTheme.typography.labelMedium, color = AtlasColors.Good)
+                c.quoteRequired -> Text("✗ цитата не найдена в документе: проверьте ответ", style = MaterialTheme.typography.labelMedium, color = AtlasColors.Alert)
+                else -> Text("Без цитаты: сверьте ответ с источником", style = MaterialTheme.typography.labelMedium, color = AtlasColors.Muted)
+            }
             if (c.duplicateOf != null) Text("Похож на уже имеющийся вопрос", style = MaterialTheme.typography.labelMedium, color = AtlasColors.Alert)
         }
     }

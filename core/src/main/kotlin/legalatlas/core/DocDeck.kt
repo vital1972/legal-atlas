@@ -45,8 +45,10 @@ data class Candidate(
     val quoteVerified: Boolean,
     /** Похож на вопрос, который уже есть в колодах. */
     val duplicateOf: String? = null,
+    /** Требовать подтверждённую цитату. Без исходного документа (углубление трудных вопросов) — нет. */
+    val quoteRequired: Boolean = true,
 ) {
-    val recommended get() = quoteVerified && duplicateOf == null
+    val recommended get() = (quoteVerified || !quoteRequired) && duplicateOf == null
 }
 
 object DocDeck {
@@ -109,6 +111,7 @@ object DocDeck {
         docText: String,
         batches: List<GenBatch>,
         today: String,
+        quoteRequired: Boolean = true,
     ): Pair<List<Candidate>, List<Topic>> {
         val normalizedDoc = normalize(docText)
         val existing = state.topics
@@ -169,6 +172,7 @@ object DocDeck {
                     newTopic = topicId in newTopics,
                     quoteVerified = verified,
                     duplicateOf = dup,
+                    quoteRequired = quoteRequired,
                 )
             }
         }

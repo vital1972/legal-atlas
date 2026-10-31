@@ -300,3 +300,33 @@ class DocDeckTest {
         assertEquals(base.topics[existingTopic]!!.world, merged.topics[existingTopic]!!.world)
     }
 }
+
+class ReworkTest {
+    @Test
+    fun easyAndWeakItemsAreFound() {
+        val deck = Decks.parse(File("../examples/sample-deck.json").readText()).deck!!
+        var state = Decks.import(AppState(), deck).state
+        val (easyItem, weakItem, retired) = deck.items.take(3)
+        var t = 1_760_000_000_000L
+        state = Progress.record(state, easyItem, Mode.NEW, Rating.EASY, Confidence.SURE, 1000, t)
+        repeat(4) {
+            t = state.cards[easyItem.id]!!.due
+            state = Progress.record(state, easyItem, Mode.REVIEW, Rating.EASY, Confidence.SURE, 1000, t)
+        }
+        var w = 1_760_000_000_000L
+        state = Progress.record(state, weakItem, Mode.NEW, Rating.GOOD, Confidence.SURE, 1000, w)
+        repeat(3) {
+            w += 2 * Fsrs.DAY
+            state = Progress.record(state, weakItem, Mode.REVIEW, Rating.AGAIN, Confidence.SURE, 1000, w, answer = "неверно")
+        }
+        state = Progress.record(state, retired, Mode.NEW, Rating.AGAIN, Confidence.SURE, 1000, w)
+        state = state.copy(retiredItems = setOf(retired.id))
+
+        val a = Rework.analyze(state, t)
+        assertEquals(listOf(easyItem.id), a.easy.map { it.id })
+        assertEquals(listOf(weakItem.id), a.weak.map { it.item.id })
+        assertTrue(a.weak[0].wrongAnswers.contains("неверно"))
+        assertTrue(Planner(ZoneOffset.UTC).plan(state.copy(unlockedTopics = deck.topics.map { it.id }.toSet()), t + 400 * Fsrs.DAY, 60)
+            .none { it.item.id == retired.id }, "убранные вопросы не планируются")
+    }
+}

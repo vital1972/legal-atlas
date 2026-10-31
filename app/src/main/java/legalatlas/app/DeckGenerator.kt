@@ -7,6 +7,7 @@ import legalatlas.core.AtlasJson
 import legalatlas.core.DocText
 import legalatlas.core.GenBatch
 import legalatlas.core.GenTopic
+import legalatlas.core.Rework
 
 /**
  * Создание вопросов по документу через DeepSeek. Документ делится на части; каждая часть —
@@ -42,6 +43,29 @@ class DeckGenerator(apiKey: String) {
             known += batch.newTopics.filter { t -> known.none { it.id == t.id } }
         }
         onProgress(plan.parts.size, plan.parts.size)
+        return out
+    }
+
+    /** Новые вопросы к трудным: по 1–2 на каждый, с другой стороны, в ту же книгу. */
+    suspend fun deepen(
+        weak: List<Rework.Weak>,
+        topicTitles: Map<String, String>,
+        onProgress: (done: Int, total: Int) -> Unit,
+    ): List<GenBatch> {
+        val groups = weak.chunked(5)
+        val out = mutableListOf<GenBatch>()
+        groups.forEachIndexed { i, group ->
+            onProgress(i, groups.size)
+            val content = client.json(
+                system = DEEPEN_SYSTEM,
+                user = deepenPrompt(group, topicTitles) + "\n\n" + SHAPE,
+                maxTokens = 8000,
+                timeoutMs = 180_000,
+            )
+            out += runCatching { AtlasJson.decodeFromString(GenBatch.serializer(), content) }
+                .getOrElse { throw IOException("DeepSeek вернул ответ не по схеме") }
+        }
+        onProgress(groups.size, groups.size)
         return out
     }
 
@@ -83,6 +107,33 @@ class DeckGenerator(apiKey: String) {
             9. pretest: true у 1–2 вопросов на каждую новую книгу: простые, но неочевидные.
             10. choice: 3–4 правдоподобных варианта, correct_option — индекс верного с нуля.
         """.trimIndent()
+
+        private val DEEPEN_SYSTEM = """
+            Ты помогаешь опытному российскому юристу закрепить то, что у него плохо держится в памяти.
+            Тебе даны вопросы, на которых он ошибается, с эталоном и его неверными ответами.
+            Для каждого составь 1–2 НОВЫХ вопроса, которые подходят к тому же знанию с другой стороны:
+            различение с похожим правилом, применение к ситуации, исключение из правила, последствия нарушения.
+            Не перефразируй исходный вопрос. Если в неверных ответах видна конкретная путаница — построй вопрос на ней.
+            Опирайся только на эталон, обоснование и цитату исходного вопроса; не выдумывай номера статей и пунктов.
+            rationale_quote указывай, только если копируешь её дословно из цитаты исходного вопроса, иначе null.
+            Для free_recall и case_scenario обязательно key_points, why_prompt и rationale.
+            topic_id нового вопроса — тот же, что у исходного. new_topics оставь пустым.
+        """.trimIndent()
+
+        private fun deepenPrompt(group: List<Rework.Weak>, topicTitles: Map<String, String>): String =
+            group.joinToString("\n\n") { w ->
+                val it = w.item
+                listOfNotNull(
+                    "### topic_id: ${it.topicId} (${topicTitles[it.topicId] ?: ""})",
+                    "Вопрос: ${it.prompt}",
+                    "Эталон: ${it.answer}",
+                    it.rationale?.let { r -> "Обоснование: $r" },
+                    it.rationaleQuote?.let { q -> "Цитата: $q" },
+                    it.source?.locator?.let { l -> "Где: $l" },
+                    "Почему трудный: ${w.reasons.joinToString(", ")}",
+                    w.wrongAnswers.takeIf { a -> a.isNotEmpty() }?.let { a -> "Неверные ответы пользователя:\n" + a.joinToString("\n") { x -> "- ${x.take(500)}" } },
+                ).joinToString("\n")
+            }
 
         private val SHAPE = """
             Ответь только JSON-объектом:

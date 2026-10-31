@@ -26,7 +26,7 @@ class Planner(
         var used = 0.0
         var feynmanUsed = 0.0
         val picked = mutableListOf<PlannedItem>()
-        val usable = state.items.values.filter { it.id !in state.flaggedItems }
+        val usable = state.items.values.filter { it.id !in state.flaggedItems && it.id !in state.retiredItems }
 
         fun withWhy(item: Item) = state.settings.feynman && Feynman.eligible(item) &&
             feynmanUsed + FEYNMAN_SECONDS <= budget * FEYNMAN_SHARE
@@ -50,7 +50,7 @@ class Planner(
         val newLeft = state.settings.newPerDay - introducedToday(state, now)
         if (newLeft > 0) {
             val fresh = orderedItems(state)
-                .filter { it.id !in state.cards && it.id !in state.flaggedItems && it.topicId in state.unlockedTopics }
+                .filter { it.id !in state.cards && it.id !in state.flaggedItems && it.id !in state.retiredItems && it.topicId in state.unlockedTopics }
             for (item in fresh.take(newLeft)) {
                 if (used + cost(item) > budget) break
                 add(item, Mode.NEW)
@@ -74,7 +74,7 @@ class Planner(
 
     /** Вопросы для «разведки» закрытой области: сначала помеченные pretest. */
     fun pretest(state: AppState, topicId: String, count: Int = 5): List<PlannedItem> =
-        orderedItems(state).filter { it.topicId == topicId && it.id !in state.flaggedItems }
+        orderedItems(state).filter { it.topicId == topicId && it.id !in state.flaggedItems && it.id !in state.retiredItems }
             .sortedByDescending { it.pretest }
             .take(count)
             .map { PlannedItem(it, Mode.PRETEST) }
@@ -98,7 +98,7 @@ class Planner(
     }
 
     fun dueCount(state: AppState, now: Long): Int =
-        state.cards.values.count { it.due <= now && it.itemId in state.items && it.itemId !in state.flaggedItems }
+        state.cards.values.count { it.due <= now && it.itemId in state.items && it.itemId !in state.flaggedItems && it.itemId !in state.retiredItems }
 
     private fun orderedItems(state: AppState): List<Item> =
         state.decks.values.sortedBy { it.deck.title }.flatMap { it.items }

@@ -17,6 +17,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import legalatlas.app.ui.AtlasTheme
 import legalatlas.app.ui.GenerateScreen
 import legalatlas.app.ui.HomeScreen
+import legalatlas.app.ui.ReworkScreen
 import legalatlas.app.ui.SessionScreen
 import legalatlas.app.ui.SettingsScreen
 import legalatlas.app.ui.SummaryScreen
@@ -74,6 +75,10 @@ private fun App(vm: AtlasViewModel) {
         Screen.Generate -> {
             BackHandler { vm.closeGenerator() }
             GenerateScreen(vm)
+        }
+        Screen.Rework -> {
+            BackHandler { vm.go(Screen.Settings) }
+            ReworkScreen(vm)
         }
         Screen.Settings -> {
             BackHandler { vm.go(Screen.Home) }

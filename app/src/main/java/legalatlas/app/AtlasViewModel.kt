@@ -33,6 +33,7 @@ import legalatlas.core.PlannedItem
 import legalatlas.core.Planner
 import legalatlas.core.Progress
 import legalatlas.core.Rating
+import legalatlas.core.Rework
 import legalatlas.core.ReviewLog
 import legalatlas.core.Settings
 import legalatlas.core.Topic
@@ -43,10 +44,16 @@ sealed interface Screen {
     data object Summary : Screen
     data object Settings : Screen
     data object Generate : Screen
+    data object Rework : Screen
 }
+
+/** DOCUMENT — вопросы из документа; DEEPEN — новые вопросы к трудным при переработке. */
+enum class GenMode { DOCUMENT, DEEPEN }
 
 /** Создание колоды из документа: от выбора файла до предпросмотра вопросов. */
 data class GenUi(
+    val mode: GenMode = GenMode.DOCUMENT,
+    val weak: List<Rework.Weak> = emptyList(),
     val docTitle: String,
     val text: String,
     val total: Int = 20,
@@ -106,6 +113,9 @@ class AtlasViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _gen = MutableStateFlow<GenUi?>(null)
     val gen: StateFlow<GenUi?> = _gen.asStateFlow()
+
+    private val _rework = MutableStateFlow<Rework.Analysis?>(null)
+    val rework: StateFlow<Rework.Analysis?> = _rework.asStateFlow()
 
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
@@ -212,17 +222,27 @@ class AtlasViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         val plan = DeckGenerator.plan(g.text, g.total)
-        _gen.value = g.copy(running = true, error = null, truncated = plan.truncated, candidates = emptyList(), selected = emptySet())
+        _gen.value = g.copy(running = true, error = null, truncated = g.mode == GenMode.DOCUMENT && plan.truncated, candidates = emptyList(), selected = emptySet())
         viewModelScope.launch {
             val state = _state.value
+            val generator = DeckGenerator(key)
             val result = runCatching {
-                DeckGenerator(key).generate(plan, g.docTitle, g.focus, DocDeck.existingTopics(state)) { done, total ->
-                    _gen.update { it?.copy(progress = if (done < total) "Читаю часть ${done + 1} из $total…" else "Проверяю цитаты…") }
+                if (g.mode == GenMode.DEEPEN) {
+                    generator.deepen(g.weak, state.topics.mapValues { it.value.title }) { done, total ->
+                        _gen.update { it?.copy(progress = if (done < total) "Придумываю вопросы: ${done + 1} из $total…" else "Проверяю…") }
+                    }
+                } else {
+                    generator.generate(plan, g.docTitle, g.focus, DocDeck.existingTopics(state)) { done, total ->
+                        _gen.update { it?.copy(progress = if (done < total) "Читаю часть ${done + 1} из $total…" else "Проверяю цитаты…") }
+                    }
                 }
             }
             result.fold(
                 onSuccess = { batches ->
-                    val (cands, topics) = DocDeck.candidates(state, g.deckId, g.docTitle, g.text, batches, LocalDate.now().toString())
+                    val (cands, topics) = DocDeck.candidates(
+                        state, g.deckId, g.docTitle, g.text, batches, LocalDate.now().toString(),
+                        quoteRequired = g.mode == GenMode.DOCUMENT,
+                    )
                     _gen.update {
                         it?.copy(
                             running = false, progress = null, candidates = cands, newTopics = topics,
@@ -248,6 +268,8 @@ class AtlasViewModel(app: Application) : AndroidViewModel(app) {
         }
         val newBooks = deck.topics.count { t -> g.newTopics.any { it.id == t.id } }
         update { Decks.import(it, deck).state }
+        // Текст документа хранится рядом: по нему проверяются цитаты при углублении трудных вопросов.
+        if (g.mode == GenMode.DOCUMENT) runCatching { docFile(g.deckId).apply { parentFile?.mkdirs() }.writeText(g.text) }
         _gen.value = null
         _screen.value = Screen.Home
         _message.value = buildString {
@@ -259,9 +281,47 @@ class AtlasViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun closeGenerator() {
-        if (_gen.value?.running == true) return
+        val g = _gen.value
+        if (g?.running == true) return
         _gen.value = null
-        _screen.value = Screen.Home
+        _screen.value = if (g?.mode == GenMode.DEEPEN) Screen.Rework else Screen.Home
+    }
+
+    private fun docFile(deckId: String) = java.io.File(getApplication<Application>().filesDir, "docs/$deckId.txt")
+
+    // ---------- Переработка колод ----------
+
+    fun openRework() {
+        _rework.value = Rework.analyze(_state.value, System.currentTimeMillis())
+        _screen.value = Screen.Rework
+    }
+
+    /** Лёгкие вопросы убираются из повторений; вернуть их можно в настройках. */
+    fun retire(ids: Set<String>) {
+        if (ids.isEmpty()) return
+        update { it.copy(retiredItems = it.retiredItems + ids) }
+        _rework.value = Rework.analyze(_state.value, System.currentTimeMillis())
+        _message.value = "Убрано из повторений: ${ids.size}. Вернуть их можно в настройках."
+    }
+
+    fun restoreRetired() = update { it.copy(retiredItems = emptySet()) }
+
+    /** Новые вопросы к трудным: генерация и тот же предпросмотр, что для документа. */
+    fun deepen(ids: Set<String>) {
+        val weak = _rework.value?.weak.orEmpty().filter { it.item.id in ids }
+        if (weak.isEmpty()) return
+        val state = _state.value
+        val deckIds = state.decks.filterValues { d -> d.items.any { i -> weak.any { it.item.id == i.id } } }.keys
+        val docs = deckIds.mapNotNull { id -> runCatching { docFile(id).takeIf { it.exists() }?.readText() }.getOrNull() }
+        _gen.value = GenUi(
+            mode = GenMode.DEEPEN,
+            weak = weak,
+            docTitle = "Углубление ${LocalDate.now()}",
+            text = docs.joinToString("\n\n"),
+            deckId = "deep-" + System.currentTimeMillis().toString(36),
+        )
+        _screen.value = Screen.Generate
+        generate()
     }
 
     fun importSample() {
@@ -274,6 +334,7 @@ class AtlasViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun deleteDeck(deckId: String) = update { s ->
+        runCatching { docFile(deckId).delete() }
         val ids = s.decks[deckId]?.items?.map { it.id }?.toSet().orEmpty()
         s.copy(decks = s.decks - deckId, cards = s.cards - ids)
     }
@@ -369,6 +430,7 @@ class AtlasViewModel(app: Application) : AndroidViewModel(app) {
                         put("topic_id", item.topicId)
                         put("prompt", item.prompt)
                         put("flagged", item.id in s.flaggedItems)
+                        put("retired", item.id in s.retiredItems)
                         if (card != null) {
                             put("reps", card.reps)
                             put("lapses", card.lapses)
