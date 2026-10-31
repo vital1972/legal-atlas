@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -56,6 +57,11 @@ fun HomeScreen(vm: AtlasViewModel) {
     val currentWorld = world?.takeIf { it in worlds } ?: worlds.firstOrNull()
     var selected by remember { mutableStateOf<TopicMastery?>(null) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::importUri) }
+    val docTypes = arrayOf(
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/rtf", "text/rtf", "text/plain", "application/json", "*/*",
+    )
 
     Column(
         Modifier
@@ -65,11 +71,14 @@ fun HomeScreen(vm: AtlasViewModel) {
     ) {
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Атлас права", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+            IconButton(onClick = { picker.launch(docTypes) }) {
+                Icon(Icons.Filled.Add, contentDescription = "Колода из документа или файла")
+            }
             IconButton(onClick = { vm.go(Screen.Settings) }) { Icon(Icons.Filled.Settings, contentDescription = "Настройки") }
         }
 
         if (state.decks.isEmpty()) {
-            EmptyAtlas(onSample = vm::importSample, onFile = { picker.launch(arrayOf("application/json", "text/plain", "*/*")) })
+            EmptyAtlas(onSample = vm::importSample, onFile = { picker.launch(docTypes) })
             return@Column
         }
 
@@ -149,13 +158,13 @@ private fun EmptyAtlas(onSample: () -> Unit, onFile: () -> Unit) {
         Text("Карта пока пуста", style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(12.dp))
         Text(
-            "Загрузите колоду вопросов, подготовленную в Claude, или начните с примера по исковой давности.",
+            "Выберите документ (PDF, Word, RTF): приложение создаст по нему вопросы. Можно загрузить готовую колоду JSON или начать с примера по исковой давности.",
             style = MaterialTheme.typography.bodyLarge,
         )
         Spacer(Modifier.height(24.dp))
         Button(onClick = onSample, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("Загрузить пример") }
         Spacer(Modifier.height(12.dp))
-        OutlinedButton(onClick = onFile, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("Выбрать файл JSON") }
+        OutlinedButton(onClick = onFile, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("Выбрать документ или колоду") }
     }
 }
 

@@ -2,20 +2,27 @@ package legalatlas.app
 
 import android.app.Application
 import android.net.Uri
+import android.provider.OpenableColumns
+import java.time.LocalDate
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import legalatlas.core.AppState
 import legalatlas.core.AtlasJson
+import legalatlas.core.Candidate
 import legalatlas.core.Confidence
+import legalatlas.core.DocDeck
+import legalatlas.core.DocText
 import legalatlas.core.Decks
 import legalatlas.core.Feynman
 import legalatlas.core.Formats
@@ -28,13 +35,31 @@ import legalatlas.core.Progress
 import legalatlas.core.Rating
 import legalatlas.core.ReviewLog
 import legalatlas.core.Settings
+import legalatlas.core.Topic
 
 sealed interface Screen {
     data object Home : Screen
     data object Session : Screen
     data object Summary : Screen
     data object Settings : Screen
+    data object Generate : Screen
 }
+
+/** Создание колоды из документа: от выбора файла до предпросмотра вопросов. */
+data class GenUi(
+    val docTitle: String,
+    val text: String,
+    val total: Int = 20,
+    val focus: String = "",
+    val running: Boolean = false,
+    val progress: String? = null,
+    val error: String? = null,
+    val truncated: Boolean = false,
+    val deckId: String = "doc-" + System.currentTimeMillis().toString(36),
+    val candidates: List<Candidate> = emptyList(),
+    val newTopics: List<Topic> = emptyList(),
+    val selected: Set<String> = emptySet(),
+)
 
 /** WHY — шаг Фейнмана: после ответа объяснить, почему он такой. */
 enum class Phase { ANSWER, WHY, GRADING, FEEDBACK }
@@ -78,6 +103,9 @@ class AtlasViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
+
+    private val _gen = MutableStateFlow<GenUi?>(null)
+    val gen: StateFlow<GenUi?> = _gen.asStateFlow()
 
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
@@ -123,19 +151,126 @@ class AtlasViewModel(app: Application) : AndroidViewModel(app) {
         _message.value = "Колода загружена. $summary$warn"
     }
 
+    /** Файл колоды (JSON) загружается сразу, любой другой документ открывает создание колоды. */
     fun importUri(uri: Uri) {
-        val text = runCatching {
-            getApplication<Application>().contentResolver.openInputStream(uri)!!.bufferedReader().use { it.readText() }
-        }.getOrElse {
+        val app = getApplication<Application>()
+        val name = displayName(uri)
+        val bytes = runCatching { app.contentResolver.openInputStream(uri)!!.use { it.readBytes() } }.getOrElse {
             _message.value = "Не удалось прочитать файл: ${it.message}"
             return
         }
-        importText(text, "файл")
+        val head = String(bytes.take(64).toByteArray(), Charsets.UTF_8).trimStart('\uFEFF', ' ', '\n', '\r', '\t')
+        if (name.lowercase().endsWith(".json") || head.startsWith("{")) {
+            importText(DocText.decodeText(bytes), "файл")
+            return
+        }
+        val isPdf = name.lowercase().endsWith(".pdf") || app.contentResolver.getType(uri) == "application/pdf" ||
+            head.startsWith("%PDF")
+        viewModelScope.launch {
+            _busy.value = true
+            val text = runCatching {
+                withContext(Dispatchers.IO) { if (isPdf) PdfText.extract(app, bytes) else DocText.extract(name, bytes) }
+            }
+            _busy.value = false
+            text.fold(
+                onSuccess = { openDocumentText(name.substringBeforeLast('.').ifBlank { "Документ" }, it) },
+                onFailure = { _message.value = "Не удалось извлечь текст из «$name»: ${it.message}" },
+            )
+        }
+    }
+
+    private fun displayName(uri: Uri): String = runCatching {
+        getApplication<Application>().contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst()) c.getString(0) else null
+        }
+    }.getOrNull() ?: uri.lastPathSegment.orEmpty()
+
+    // ---------- Колода из документа ----------
+
+    fun openDocumentText(title: String, text: String) {
+        if (text.length < MIN_DOC_CHARS) {
+            _message.value = "В документе почти нет текста (${text.length} знаков). Если это скан, сохраните его с распознанным текстом или в Word."
+            return
+        }
+        _gen.value = GenUi(docTitle = title, text = text, total = suggestedCount(text))
+        _screen.value = Screen.Generate
+    }
+
+    private fun suggestedCount(text: String) = (text.length / 1500).coerceIn(10, 40)
+
+    fun setGenTotal(n: Int) = _gen.update { it?.copy(total = n) }
+    fun setGenFocus(f: String) = _gen.update { it?.copy(focus = f) }
+    fun toggleCandidate(id: String) = _gen.update { g ->
+        g?.copy(selected = if (id in g.selected) g.selected - id else g.selected + id)
+    }
+
+    fun generate() {
+        val g = _gen.value ?: return
+        val key = secrets.get(SecretStore.DEEPSEEK)
+        if (key == null) {
+            _message.value = "Для создания вопросов нужен ключ DeepSeek: Настройки → «Оценка ответов»."
+            return
+        }
+        val plan = DeckGenerator.plan(g.text, g.total)
+        _gen.value = g.copy(running = true, error = null, truncated = plan.truncated, candidates = emptyList(), selected = emptySet())
+        viewModelScope.launch {
+            val state = _state.value
+            val result = runCatching {
+                DeckGenerator(key).generate(plan, g.docTitle, g.focus, DocDeck.existingTopics(state)) { done, total ->
+                    _gen.update { it?.copy(progress = if (done < total) "Читаю часть ${done + 1} из $total…" else "Проверяю цитаты…") }
+                }
+            }
+            result.fold(
+                onSuccess = { batches ->
+                    val (cands, topics) = DocDeck.candidates(state, g.deckId, g.docTitle, g.text, batches, LocalDate.now().toString())
+                    _gen.update {
+                        it?.copy(
+                            running = false, progress = null, candidates = cands, newTopics = topics,
+                            selected = cands.filter { c -> c.recommended }.map { c -> c.item.id }.toSet(),
+                            error = if (cands.isEmpty()) "Модель не предложила ни одного вопроса. Попробуйте другой фрагмент или уточните акцент." else null,
+                        )
+                    }
+                },
+                onFailure = { e -> _gen.update { it?.copy(running = false, progress = null, error = e.message ?: "Ошибка") } },
+            )
+        }
+    }
+
+    fun addSelected() {
+        val g = _gen.value ?: return
+        val chosen = g.candidates.filter { it.item.id in g.selected }.map { it.item }
+        if (chosen.isEmpty()) return
+        val deck = DocDeck.build(_state.value, g.deckId, g.docTitle, chosen, g.newTopics)
+        val check = Decks.parse(AtlasJson.encodeToString(legalatlas.core.DeckFile.serializer(), deck))
+        if (!check.ok) {
+            _message.value = "Колода не прошла проверку: " + check.errors.take(3).joinToString("; ")
+            return
+        }
+        val newBooks = deck.topics.count { t -> g.newTopics.any { it.id == t.id } }
+        update { Decks.import(it, deck).state }
+        _gen.value = null
+        _screen.value = Screen.Home
+        _message.value = buildString {
+            append("Добавлено вопросов: ${chosen.size}.")
+            val intoExisting = chosen.count { c -> g.newTopics.none { it.id == c.topicId } }
+            if (intoExisting > 0) append(" В существующие книги: $intoExisting.")
+            if (newBooks > 0) append(" Новых книг: $newBooks. Они закрыты: начните с разведки.")
+        }
+    }
+
+    fun closeGenerator() {
+        if (_gen.value?.running == true) return
+        _gen.value = null
+        _screen.value = Screen.Home
     }
 
     fun importSample() {
         val text = getApplication<Application>().assets.open("sample-deck.json").bufferedReader().use { it.readText() }
         importText(text, "пример")
+    }
+
+    companion object {
+        private const val MIN_DOC_CHARS = 300
     }
 
     fun deleteDeck(deckId: String) = update { s ->

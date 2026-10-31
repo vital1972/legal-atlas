@@ -218,3 +218,85 @@ class FeynmanTest {
         assertTrue(Feynman.references(item.copy(rationale = null, rationaleQuote = null), AppState()).isEmpty())
     }
 }
+
+class DocTextTest {
+    @Test
+    fun docxParagraphsAreExtracted() {
+        val xml = """<?xml version="1.0"?><w:document><w:body>
+            <w:p><w:r><w:t>Статья 740.</w:t></w:r><w:r><w:t xml:space="preserve"> Договор строительного подряда</w:t></w:r></w:p>
+            <w:p><w:r><w:t>1. По договору &amp; подрядчик</w:t></w:r></w:p></w:body></w:document>"""
+        val bytes = java.io.ByteArrayOutputStream().also { bos ->
+            java.util.zip.ZipOutputStream(bos).use { zip ->
+                zip.putNextEntry(java.util.zip.ZipEntry("word/document.xml"))
+                zip.write(xml.toByteArray())
+                zip.closeEntry()
+            }
+        }.toByteArray()
+        assertEquals("Статья 740. Договор строительного подряда\n1. По договору & подрядчик", DocText.extract("гл37.docx", bytes))
+    }
+
+    @Test
+    fun rtfCyrillicAndUnicodeAreDecoded() {
+        val rtf = "{\\rtf1\\ansi\\ansicpg1251{\\fonttbl{\\f0 Times;}}{\\*\\generator x;}" +
+            "\\pard \\'d1\\'f2\\'e0\\'f2\\'fc\\'ff 740.\\par \\u1055?\\u1086?\\u1076?\\u1088?\\u1103?\\u1076?}"
+        assertEquals("Статья 740.\nПодряд", DocText.extract("doc.rtf", rtf.toByteArray(Charsets.ISO_8859_1)))
+    }
+
+    @Test
+    fun splitKeepsAllTextInRoughlyEqualParts() {
+        val text = (1..40).joinToString("\n") { "Абзац $it " + "текст ".repeat(20) }
+        val parts = DocText.split(text, 4)
+        assertEquals(4, parts.size)
+        assertEquals(text.replace("\n", "").replace(" ", ""), parts.joinToString("").replace("\n", "").replace(" ", ""))
+    }
+}
+
+class DocDeckTest {
+    private val doc = "Статья 740. Договор строительного подряда\n1. По договору строительного подряда подрядчик " +
+        "обязуется в установленный договором срок построить по заданию заказчика определенный объект."
+
+    @Test
+    fun quotesAreVerifiedLooselyButNotInvented() {
+        val norm = DocDeck.normalize(doc)
+        assertTrue(DocDeck.quoteFound("«подрядчик обязуется в установленный договором  срок построить»", norm))
+        assertTrue(DocDeck.quoteFound("подрядчик обязуется … построить по заданию заказчика", norm))
+        assertTrue(!DocDeck.quoteFound("подрядчик обязуется в разумный срок построить объект", norm))
+        assertTrue(!DocDeck.quoteFound("подряд", norm))
+        assertTrue(!DocDeck.quoteFound(null, norm))
+    }
+
+    @Test
+    fun candidatesGetIdsTopicsAndChecks() {
+        val base = Decks.import(AppState(), Decks.parse(File("../examples/sample-deck.json").readText()).deck!!).state
+        val existingTopic = base.topics.keys.first()
+        val existingPrompt = base.items.values.first { it.topicId == existingTopic }.prompt
+        val batches = listOf(
+            GenBatch(
+                newTopics = listOf(GenTopic("n1", "Строительный подряд", "Гражданское право")),
+                items = listOf(
+                    GenItem(topicId = "n1", prompt = "Что обязуется сделать подрядчик?", answer = "Построить объект",
+                        rationaleQuote = "подрядчик обязуется в установленный договором срок построить"),
+                    GenItem(topicId = existingTopic, prompt = existingPrompt, answer = "то же", rationaleQuote = "выдуманная цитата из головы модели"),
+                    GenItem(topicId = "нет такой", prompt = "?", answer = "!"),
+                ),
+            ),
+            GenBatch(newTopics = listOf(GenTopic("x", "строительный  подряд")), items = listOf(
+                GenItem(topicId = "x", format = Formats.CHOICE, options = listOf("один"), prompt = "Срок?", answer = "Договорный"),
+            )),
+        )
+        val (cands, topics) = DocDeck.candidates(base, "doc1", "Глава 37", doc, batches, "2026-10-31")
+        assertEquals(3, cands.size)
+        assertEquals(1, topics.size, "одинаковые названия сводятся в одну книгу")
+        assertEquals(listOf("doc1-001", "doc1-002", "doc1-003"), cands.map { it.item.id })
+        assertTrue(cands[0].recommended && cands[0].newTopic)
+        assertTrue(!cands[1].quoteVerified && cands[1].item.rationaleQuote == null && cands[1].duplicateOf != null)
+        assertEquals(topics[0].id, cands[2].item.topicId)
+        assertEquals(Formats.SELF_CHECK, cands[2].item.format, "choice без вариантов становится self_check")
+
+        val deck = DocDeck.build(base, "doc1", "Глава 37", cands.map { it.item }, topics)
+        val check = Decks.parse(AtlasJson.encodeToString(DeckFile.serializer(), deck))
+        assertTrue(check.ok, check.errors.joinToString())
+        val merged = Decks.import(base, deck).state
+        assertEquals(base.topics[existingTopic]!!.world, merged.topics[existingTopic]!!.world)
+    }
+}

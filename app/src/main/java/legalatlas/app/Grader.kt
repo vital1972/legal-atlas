@@ -1,15 +1,6 @@
 package legalatlas.app
 
 import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import legalatlas.core.AtlasJson
 import legalatlas.core.Feynman
 import legalatlas.core.Item
@@ -28,21 +19,11 @@ class Grader(private val apiKey: String, private val model: String = "deepseek-c
         references: List<Feynman.Reference> = emptyList(),
     ): GradeResult {
         val why = reasoning != null
-        val body = AtlasJson.encodeToString(
-            ChatRequest.serializer(),
-            ChatRequest(
-                model = model,
-                maxTokens = 2000,
-                responseFormat = ResponseFormat("json_object"),
-                messages = listOf(
-                    ChatMessage("system", if (why) "$SYSTEM\n\n$WHY_RULES\n\n$WHY_JSON_SHAPE" else "$SYSTEM\n\n$JSON_SHAPE"),
-                    ChatMessage("user", userPrompt(item, answer.take(8000), reasoning?.take(6000), references)),
-                ),
-            ),
+        val content = DeepSeek(apiKey, model).json(
+            system = if (why) "$SYSTEM\n\n$WHY_RULES\n\n$WHY_JSON_SHAPE" else "$SYSTEM\n\n$JSON_SHAPE",
+            user = userPrompt(item, answer.take(8000), reasoning?.take(6000), references),
+            maxTokens = 2000,
         )
-        val root = AtlasJson.parseToJsonElement(post(body)).jsonObject
-        val content = root["choices"]?.jsonArray?.firstOrNull()?.jsonObject
-            ?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.content.orEmpty()
         val result = runCatching { AtlasJson.decodeFromString(GradeResult.serializer(), content) }
             .getOrElse { throw IOException("DeepSeek вернул ответ не по схеме") }
         val reasoningGrade = if (!why) null else (result.reasoning ?: ReasoningGrade()).let {
@@ -56,42 +37,6 @@ class Grader(private val apiKey: String, private val model: String = "deepseek-c
             reasoning = reasoningGrade,
         )
     }
-
-    private suspend fun post(body: String): String = withContext(Dispatchers.IO) {
-        val conn = URL("https://api.deepseek.com/chat/completions").openConnection() as HttpURLConnection
-        try {
-            conn.requestMethod = "POST"
-            conn.connectTimeout = 10_000
-            conn.readTimeout = 60_000
-            conn.doOutput = true
-            conn.setRequestProperty("Authorization", "Bearer $apiKey")
-            conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-            conn.outputStream.use { it.write(body.toByteArray()) }
-            val code = conn.responseCode
-            val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
-                ?.bufferedReader()?.use { it.readText() }.orEmpty()
-            if (code == 401) throw IOException("DeepSeek не принял ключ. Проверьте его в настройках")
-            if (code == 402) throw IOException("На счёте DeepSeek закончились деньги")
-            if (code !in 200..299) throw IOException("DeepSeek ответил $code: ${text.take(200)}")
-            text
-        } finally {
-            conn.disconnect()
-        }
-    }
-
-    @Serializable
-    private data class ChatMessage(val role: String, val content: String)
-
-    @Serializable
-    private data class ResponseFormat(val type: String)
-
-    @Serializable
-    private data class ChatRequest(
-        val model: String,
-        @SerialName("max_tokens") val maxTokens: Int,
-        @SerialName("response_format") val responseFormat: ResponseFormat,
-        val messages: List<ChatMessage>,
-    )
 
     companion object {
         // Та же рубрика, что на сервере (server/src/grade.ts): оценки не зависят от того, кто вызывает модель.
