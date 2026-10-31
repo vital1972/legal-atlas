@@ -81,7 +81,7 @@ fun MapCanvas(
 
         // Пустые соты вокруг — неисследованная территория мира.
         occupied.flatMap { it.neighbors() }.filter { it !in occupied }.toSet().forEach { hex ->
-            drawPath(hexPath(center + hexToPixel(hex, size), size * 0.94f), Color.White.copy(alpha = 0.06f), style = Stroke(1.5f))
+            drawPath(hexPath(center + hexToPixel(hex, size), size * 0.94f), AtlasColors.Text.copy(alpha = 0.08f), style = Stroke(1.5f))
         }
 
         for ((id, hex) in cells) {
@@ -90,18 +90,18 @@ fun MapCanvas(
             val path = hexPath(c, size * 0.94f)
             val fill = when {
                 !tm.unlocked -> AtlasColors.Fog
-                else -> lerp(AtlasColors.Dim, AtlasColors.Gold, tm.mastery.toFloat().coerceIn(0f, 1f).pow(0.7f))
+                else -> lerp(AtlasColors.Soft, AtlasColors.Accent, tm.mastery.toFloat().coerceIn(0f, 1f).pow(0.7f))
             }
             drawPath(path, fill)
             if (!tm.unlocked) drawFog(c, size)
             val outline = when {
-                tm.unlocked && tm.due > 0 -> AtlasColors.Coral
-                tm.unlocked -> AtlasColors.Gold.copy(alpha = 0.5f)
-                else -> Color.White.copy(alpha = 0.15f)
+                tm.unlocked && tm.due > 0 -> AtlasColors.Alert
+                tm.unlocked -> AtlasColors.Accent.copy(alpha = 0.5f)
+                else -> AtlasColors.Muted.copy(alpha = 0.3f)
             }
             drawPath(path, outline, style = Stroke(if (tm.due > 0) 4f else 2f))
 
-            val textColor = if (fill.luminance() > 0.45f) AtlasColors.Night else AtlasColors.Text
+            val textColor = if (fill.luminance() > 0.45f) AtlasColors.Text else Color.White
             val label = if (tm.unlocked) "${tm.topic.title}\n${(tm.mastery * 100).roundToInt()}%" else "${tm.topic.title}\n?"
             val width = (size * SQRT3 * 0.8f).toInt().coerceAtLeast(1)
             val layout = measurer.measure(
@@ -125,7 +125,7 @@ private fun DrawScope.drawFog(c: Offset, size: Float) {
     for (i in 0 until 5) {
         val angle = i * 72.0 * PI / 180
         val p = c + Offset((cos(angle) * size * 0.35).toFloat(), (sin(angle) * size * 0.35).toFloat())
-        drawCircle(Color.White.copy(alpha = 0.04f), radius = size * 0.45f, center = p)
+        drawCircle(Color.White.copy(alpha = 0.35f), radius = size * 0.45f, center = p)
     }
 }
 

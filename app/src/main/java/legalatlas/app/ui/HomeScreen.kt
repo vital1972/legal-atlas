@@ -60,7 +60,7 @@ fun HomeScreen(vm: AtlasViewModel) {
     Column(
         Modifier
             .fillMaxSize()
-            .background(AtlasColors.Night)
+            .background(AtlasColors.Paper)
             .safeDrawingPadding(),
     ) {
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -85,7 +85,7 @@ fun HomeScreen(vm: AtlasViewModel) {
             LinearProgressIndicator(
                 progress = { (minutes.toFloat() / goal).coerceIn(0f, 1f) },
                 modifier = Modifier.fillMaxWidth(),
-                color = AtlasColors.Mint,
+                color = AtlasColors.Good,
                 trackColor = AtlasColors.Fog,
             )
         }
@@ -105,7 +105,7 @@ fun HomeScreen(vm: AtlasViewModel) {
             Text(
                 currentWorld.orEmpty(),
                 style = MaterialTheme.typography.titleMedium,
-                color = AtlasColors.Gold,
+                color = AtlasColors.Accent,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
             )
         }
@@ -174,7 +174,7 @@ private fun TopicDialog(tm: TopicMastery, onDismiss: () -> Unit, onPretest: () -
                     Text("Освоено: ${(tm.mastery * 100).roundToInt()}%")
                     Text("Изучено вопросов: ${tm.introduced} из ${tm.total}")
                     if (tm.introduced > 0) Text("Вспомните сегодня: ${(tm.recall * 100).roundToInt()}% изученного")
-                    if (tm.due > 0) Text("Ждут повторения: ${tm.due}", color = AtlasColors.Coral)
+                    if (tm.due > 0) Text("Ждут повторения: ${tm.due}", color = AtlasColors.Alert)
                 }
             }
         },

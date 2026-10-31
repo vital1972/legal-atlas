@@ -64,7 +64,7 @@ fun SessionScreen(vm: AtlasViewModel) {
     Column(
         Modifier
             .fillMaxSize()
-            .background(AtlasColors.Night)
+            .background(AtlasColors.Paper)
             .safeDrawingPadding()
             .imePadding(),
     ) {
@@ -80,7 +80,7 @@ fun SessionScreen(vm: AtlasViewModel) {
         LinearProgressIndicator(
             progress = { session.index.toFloat() / session.items.size },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            color = AtlasColors.Gold,
+            color = AtlasColors.Accent,
             trackColor = AtlasColors.Fog,
         )
 
@@ -122,10 +122,10 @@ fun SessionScreen(vm: AtlasViewModel) {
 @Composable
 private fun ModeBadge(mode: Mode) {
     val (text, color) = when (mode) {
-        Mode.REVIEW -> "Повторение" to AtlasColors.Mint
-        Mode.NEW -> "Новый вопрос" to AtlasColors.Gold
-        Mode.AHEAD -> "Укрепление" to AtlasColors.Mint
-        Mode.PRETEST -> "Разведка: попробуйте угадать" to AtlasColors.Coral
+        Mode.REVIEW -> "Повторение" to AtlasColors.Good
+        Mode.NEW -> "Новый вопрос" to AtlasColors.Accent
+        Mode.AHEAD -> "Укрепление" to AtlasColors.Good
+        Mode.PRETEST -> "Разведка: попробуйте угадать" to AtlasColors.Alert
     }
     Text(
         text,
@@ -147,7 +147,7 @@ private fun AnswerInput(vm: AtlasViewModel, session: SessionUi, item: Item) {
                     style = MaterialTheme.typography.bodyLarge,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .border(2.dp, if (chosen) AtlasColors.Gold else AtlasColors.Fog, RoundedCornerShape(12.dp))
+                        .border(2.dp, if (chosen) AtlasColors.Accent else AtlasColors.Fog, RoundedCornerShape(12.dp))
                         .clickable { vm.selectOption(i) }
                         .padding(14.dp),
                 )
@@ -186,7 +186,7 @@ private fun AnswerInput(vm: AtlasViewModel, session: SessionUi, item: Item) {
     }
     if (item.hints.isNotEmpty()) {
         Spacer(Modifier.height(12.dp))
-        item.hints.take(hintsShown).forEach { Text("Подсказка: $it", color = AtlasColors.Mint) }
+        item.hints.take(hintsShown).forEach { Text("Подсказка: $it", color = AtlasColors.Good) }
         if (hintsShown < item.hints.size) TextButton(onClick = { hintsShown++ }) { Text("Подсказка") }
     }
 }
@@ -207,8 +207,8 @@ private fun ConfidenceButtons(enabled: Boolean, selfCheck: Boolean, onSubmit: (C
                     onClick = { onSubmit(c) },
                     enabled = enabled,
                     modifier = Modifier.weight(1f).height(56.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = if (c == Confidence.SURE) AtlasColors.Gold else AtlasColors.Dim,
-                        contentColor = if (c == Confidence.SURE) AtlasColors.Night else AtlasColors.Text),
+                    colors = ButtonDefaults.buttonColors(containerColor = if (c == Confidence.SURE) AtlasColors.Accent else AtlasColors.Soft,
+                        contentColor = if (c == Confidence.SURE) Color.White else AtlasColors.Text),
                 ) { Text(label, maxLines = 2) }
             }
         }
@@ -220,16 +220,16 @@ private fun Feedback(session: SessionUi, item: Item) {
     val rating = session.suggested
     val confidence = session.confidence
     if (rating != null && confidence != null && Progress.isConfidentError(rating, confidence)) {
-        Banner("Уверенная ошибка. Такие ошибки запоминаются лучше всего, если сейчас внимательно прочитать разбор.", AtlasColors.Coral)
+        Banner("Уверенная ошибка. Такие ошибки запоминаются лучше всего, если сейчас внимательно прочитать разбор.", AtlasColors.Alert)
         Spacer(Modifier.height(12.dp))
     }
     if (item.format == Formats.CHOICE) {
         val correct = session.selectedOption == item.correctOption
-        Banner(if (correct) "Верно" else "Неверно", if (correct) AtlasColors.Mint else AtlasColors.Coral)
+        Banner(if (correct) "Верно" else "Неверно", if (correct) AtlasColors.Good else AtlasColors.Alert)
         Spacer(Modifier.height(12.dp))
     }
     session.gradeError?.let {
-        Text(it, color = AtlasColors.Coral)
+        Text(it, color = AtlasColors.Alert)
         Spacer(Modifier.height(12.dp))
     }
     session.grade?.let { g ->
@@ -237,23 +237,23 @@ private fun Feedback(session: SessionUi, item: Item) {
             Text(g.feedback, style = MaterialTheme.typography.bodyLarge)
             Spacer(Modifier.height(12.dp))
         }
-        g.errors.forEach { Text("Ошибка: $it", color = AtlasColors.Coral) }
+        g.errors.forEach { Text("Ошибка: $it", color = AtlasColors.Alert) }
     }
     if (item.keyPoints.isNotEmpty()) {
-        Text("Ключевые тезисы", style = MaterialTheme.typography.titleMedium, color = AtlasColors.Gold)
+        Text("Ключевые тезисы", style = MaterialTheme.typography.titleMedium, color = AtlasColors.Accent)
         val statuses = session.grade?.keyPoints?.associate { it.id to it.status }.orEmpty()
         item.keyPoints.forEach { kp ->
             val (mark, color) = when (statuses[kp.id]) {
-                "covered" -> "✓" to AtlasColors.Mint
-                "partial" -> "≈" to AtlasColors.Gold
-                "missing" -> "✗" to AtlasColors.Coral
+                "covered" -> "✓" to AtlasColors.Good
+                "partial" -> "≈" to AtlasColors.Accent
+                "missing" -> "✗" to AtlasColors.Alert
                 else -> "•" to AtlasColors.Muted
             }
             Text("$mark ${kp.text}", color = color, modifier = Modifier.padding(vertical = 2.dp))
         }
         Spacer(Modifier.height(12.dp))
     }
-    Text("Эталонный ответ", style = MaterialTheme.typography.titleMedium, color = AtlasColors.Gold)
+    Text("Эталонный ответ", style = MaterialTheme.typography.titleMedium, color = AtlasColors.Accent)
     Text(item.answer, style = MaterialTheme.typography.bodyLarge)
     item.explanation?.let {
         Spacer(Modifier.height(8.dp))
@@ -261,7 +261,7 @@ private fun Feedback(session: SessionUi, item: Item) {
     }
     item.whyPrompt?.let {
         Spacer(Modifier.height(12.dp))
-        Text("Подумайте: $it", color = AtlasColors.Mint)
+        Text("Подумайте: $it", color = AtlasColors.Good)
     }
     val source = listOfNotNull(item.source?.title, item.source?.locator).joinToString(", ")
     if (source.isNotBlank() || item.norms.isNotEmpty()) {
@@ -279,7 +279,7 @@ private fun Feedback(session: SessionUi, item: Item) {
 private fun Banner(text: String, color: Color) {
     Text(
         text,
-        color = AtlasColors.Night,
+        color = Color.White,
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier.fillMaxWidth().background(color, RoundedCornerShape(10.dp)).padding(12.dp),
     )
@@ -309,8 +309,8 @@ private fun RatingButtons(session: SessionUi, item: Item, onRate: (Rating) -> Un
                         onClick = { onRate(r) },
                         modifier = Modifier.weight(1f).height(60.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = if (highlighted) AtlasColors.Gold else AtlasColors.Dim,
-                            contentColor = if (highlighted) AtlasColors.Night else AtlasColors.Text,
+                            containerColor = if (highlighted) AtlasColors.Accent else AtlasColors.Soft,
+                            contentColor = if (highlighted) Color.White else AtlasColors.Text,
                         ),
                     ) { Text(label, maxLines = 2, style = MaterialTheme.typography.labelLarge) }
                 }

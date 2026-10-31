@@ -17,6 +17,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -48,6 +49,9 @@ import legalatlas.app.Screen
 fun SettingsScreen(vm: AtlasViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
+    val keyHint by vm.graderKeyHint.collectAsStateWithLifecycle()
+    val pendingRestore by vm.pendingRestore.collectAsStateWithLifecycle()
+    var graderKey by remember { mutableStateOf("") }
     val settings = state.settings
     var url by remember { mutableStateOf(settings.serverUrl) }
     var token by remember { mutableStateOf(settings.token) }
@@ -57,6 +61,10 @@ fun SettingsScreen(vm: AtlasViewModel) {
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         uri?.let(vm::writeExport)
     }
+    val backupWriter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        uri?.let(vm::writeBackup)
+    }
+    val backupReader = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::readBackup) }
 
     fun save() = vm.saveSettings(
         settings.copy(
@@ -70,7 +78,7 @@ fun SettingsScreen(vm: AtlasViewModel) {
     Column(
         Modifier
             .fillMaxSize()
-            .background(AtlasColors.Night)
+            .background(AtlasColors.Paper)
             .safeDrawingPadding()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
@@ -83,9 +91,36 @@ fun SettingsScreen(vm: AtlasViewModel) {
             Text("Настройки", style = MaterialTheme.typography.titleLarge)
         }
 
-        Text("Сервер", style = MaterialTheme.typography.titleMedium, color = AtlasColors.Gold)
+        Text("Оценка ответов", style = MaterialTheme.typography.titleMedium, color = AtlasColors.Accent)
         Text(
-            "Нужен для загрузки вопросов с компьютера, оценки развёрнутых ответов и резервной копии. Без него приложение тоже работает.",
+            if (keyHint != null) "Ключ DeepSeek сохранён ($keyHint). Развёрнутые ответы оцениваются прямо с телефона."
+            else "Вставьте ключ DeepSeek (platform.deepseek.com → API keys), и развёрнутые ответы будут оцениваться без сервера.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedTextField(
+            value = graderKey, onValueChange = { graderKey = it },
+            label = { Text(if (keyHint != null) "Новый ключ DeepSeek" else "Ключ DeepSeek") },
+            singleLine = true, modifier = Modifier.fillMaxWidth(),
+            visualTransformation = PasswordVisualTransformation(),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { vm.saveGraderKey(graderKey); graderKey = "" }, enabled = graderKey.isNotBlank(), modifier = Modifier.weight(1f)) {
+                Text("Сохранить ключ")
+            }
+            if (keyHint != null) {
+                OutlinedButton(onClick = { vm.saveGraderKey("") }, modifier = Modifier.weight(1f)) { Text("Удалить ключ") }
+            }
+        }
+        Text(
+            "Ключ хранится в зашифрованном виде только на этом телефоне и не попадает в резервную копию. Поставьте в кабинете DeepSeek лимит расходов.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        HorizontalDivider()
+        Text("Сервер (необязательно)", style = MaterialTheme.typography.titleMedium, color = AtlasColors.Accent)
+        Text(
+            "Нужен только для загрузки вопросов со страницы на компьютере. Если ключ DeepSeek сохранён выше, оценка идёт без сервера.",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         OutlinedTextField(
@@ -103,7 +138,7 @@ fun SettingsScreen(vm: AtlasViewModel) {
         }
 
         HorizontalDivider()
-        Text("Нагрузка", style = MaterialTheme.typography.titleMedium, color = AtlasColors.Gold)
+        Text("Нагрузка", style = MaterialTheme.typography.titleMedium, color = AtlasColors.Accent)
         Text("Новых вопросов в день: ${newPerDay.roundToInt()}")
         Slider(value = newPerDay, onValueChange = { newPerDay = it }, valueRange = 0f..30f, steps = 29, onValueChangeFinished = ::save)
         Text(
@@ -115,7 +150,7 @@ fun SettingsScreen(vm: AtlasViewModel) {
         Slider(value = goal, onValueChange = { goal = it }, valueRange = 30f..300f, steps = 26, onValueChangeFinished = ::save)
 
         HorizontalDivider()
-        Text("Колоды", style = MaterialTheme.typography.titleMedium, color = AtlasColors.Gold)
+        Text("Колоды", style = MaterialTheme.typography.titleMedium, color = AtlasColors.Accent)
         state.decks.values.sortedBy { it.deck.title }.forEach { d ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -136,7 +171,20 @@ fun SettingsScreen(vm: AtlasViewModel) {
         }
 
         HorizontalDivider()
-        Text("Отчёт", style = MaterialTheme.typography.titleMedium, color = AtlasColors.Gold)
+        Text("Резервная копия", style = MaterialTheme.typography.titleMedium, color = AtlasColors.Accent)
+        Text(
+            "Колоды и прогресс автоматически сохраняются в резервную копию Google, если она включена в настройках телефона. Дополнительно можно сохранить копию в файл.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedButton(onClick = { backupWriter.launch("legal-atlas-backup-${LocalDate.now()}.json") }, modifier = Modifier.fillMaxWidth()) {
+            Text("Сохранить копию в файл")
+        }
+        OutlinedButton(onClick = { backupReader.launch(arrayOf("application/json", "*/*")) }, modifier = Modifier.fillMaxWidth()) {
+            Text("Восстановить из файла")
+        }
+
+        HorizontalDivider()
+        Text("Отчёт", style = MaterialTheme.typography.titleMedium, color = AtlasColors.Accent)
         Text(
             "Файл с историей ответов и состоянием каждого вопроса. Отдайте его Claude, чтобы найти слабые места и дописать вопросы.",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -145,5 +193,20 @@ fun SettingsScreen(vm: AtlasViewModel) {
             Text("Сохранить отчёт")
         }
         Spacer(Modifier.height(24.dp))
+    }
+
+    pendingRestore?.let { restored ->
+        AlertDialog(
+            onDismissRequest = vm::cancelRestore,
+            title = { Text("Восстановить из копии?") },
+            text = {
+                Text(
+                    "В копии колод: ${restored.decks.size}, ответов в журнале: ${restored.logs.size}. " +
+                        "Всё, что сейчас в приложении, будет заменено содержимым копии.",
+                )
+            },
+            confirmButton = { TextButton(onClick = vm::confirmRestore) { Text("Восстановить") } },
+            dismissButton = { TextButton(onClick = vm::cancelRestore) { Text("Отмена") } },
+        )
     }
 }

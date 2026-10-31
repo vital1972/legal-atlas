@@ -61,6 +61,7 @@ data class SessionUi(
 
 class AtlasViewModel(app: Application) : AndroidViewModel(app) {
     private val store = Store(app.filesDir)
+    private val secrets = SecretStore(app)
     private val planner = Planner()
 
     private val _state = MutableStateFlow(store.load())
@@ -77,6 +78,14 @@ class AtlasViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
+
+    /** Последние символы сохранённого ключа DeepSeek, чтобы было видно, какой ключ стоит. */
+    private val _graderKeyHint = MutableStateFlow(secrets.get(SecretStore.DEEPSEEK)?.let(::keyHint))
+    val graderKeyHint: StateFlow<String?> = _graderKeyHint.asStateFlow()
+
+    /** Резервная копия, выбранная для восстановления: ждёт подтверждения. */
+    private val _pendingRestore = MutableStateFlow<AppState?>(null)
+    val pendingRestore: StateFlow<AppState?> = _pendingRestore.asStateFlow()
 
     init {
         if (_state.value.settings.serverUrl.isNotBlank()) sync(quiet = true)
@@ -134,6 +143,48 @@ class AtlasViewModel(app: Application) : AndroidViewModel(app) {
     // ---------- Настройки и синхронизация ----------
 
     fun saveSettings(settings: Settings) = update { it.copy(settings = settings) }
+
+    fun saveGraderKey(key: String) {
+        val value = key.trim().takeIf { it.isNotEmpty() }
+        secrets.put(SecretStore.DEEPSEEK, value)
+        _graderKeyHint.value = value?.let(::keyHint)
+        _message.value = if (value == null) "Ключ DeepSeek удалён" else "Ключ DeepSeek сохранён. Развёрнутые ответы теперь оцениваются прямо с телефона."
+    }
+
+    private fun keyHint(key: String) = "…" + key.takeLast(4)
+
+    /** Оценивать развёрнутые ответы можно по ключу на телефоне или через сервер. */
+    private fun canGrade() = _graderKeyHint.value != null || _state.value.settings.serverUrl.isNotBlank()
+
+    // ---------- Резервная копия ----------
+
+    /** Полная копия: колоды, прогресс, журнал и настройки. Ключи API в неё не входят. */
+    fun writeBackup(uri: Uri) {
+        val json = AtlasJson.encodeToString(AppState.serializer(), _state.value)
+        runCatching {
+            getApplication<Application>().contentResolver.openOutputStream(uri)!!.use { it.write(json.toByteArray()) }
+        }.onSuccess { _message.value = "Копия сохранена" }
+            .onFailure { _message.value = "Не удалось сохранить копию: ${it.message}" }
+    }
+
+    fun readBackup(uri: Uri) {
+        runCatching {
+            val text = getApplication<Application>().contentResolver.openInputStream(uri)!!.bufferedReader().use { it.readText() }
+            AtlasJson.decodeFromString(AppState.serializer(), text)
+        }.onSuccess { restored ->
+            if (restored.decks.isEmpty() && restored.logs.isEmpty()) _message.value = "В файле нет ни колод, ни ответов: это не копия «Атласа права»"
+            else _pendingRestore.value = restored
+        }.onFailure { _message.value = "Не удалось прочитать копию: ${it.message}" }
+    }
+
+    fun confirmRestore() {
+        val restored = _pendingRestore.value ?: return
+        _pendingRestore.value = null
+        update { restored }
+        _message.value = "Восстановлено: колод ${restored.decks.size}, ответов в журнале ${restored.logs.size}"
+    }
+
+    fun cancelRestore() { _pendingRestore.value = null }
 
     fun unflagAll() = update { it.copy(flaggedItems = emptySet()) }
 
@@ -248,7 +299,7 @@ class AtlasViewModel(app: Application) : AndroidViewModel(app) {
                     suggested = Progress.choiceRating(correct, confidence),
                 )
             }
-            Formats.isOpen(item.format) && ui.answerText.isNotBlank() && _state.value.settings.serverUrl.isNotBlank() -> {
+            Formats.isOpen(item.format) && ui.answerText.isNotBlank() && canGrade() -> {
                 _session.value = ui.copy(confidence = confidence, phase = Phase.GRADING)
                 grade(item, ui.answerText)
             }
@@ -258,8 +309,12 @@ class AtlasViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun grade(item: Item, answer: String) {
         val settings = _state.value.settings
+        val key = secrets.get(SecretStore.DEEPSEEK)
         viewModelScope.launch {
-            val result = runCatching { Api(settings.serverUrl, settings.token).grade(item, answer) }
+            // Ключ на телефоне важнее сервера: так оценка работает и без него.
+            val result = runCatching {
+                if (key != null) Grader(key).grade(item, answer) else Api(settings.serverUrl, settings.token).grade(item, answer)
+            }
             _session.update { ui ->
                 if (ui == null || ui.current?.item?.id != item.id) return@update ui
                 result.fold(

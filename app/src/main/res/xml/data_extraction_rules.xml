@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Резервная копия Android 12+: в облако Google и при переносе на новый телефон уходит только state.json. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <include domain="file" path="state.json" />
+        <exclude domain="sharedpref" path="secrets.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="file" path="state.json" />
+        <exclude domain="sharedpref" path="secrets.xml" />
+    </device-transfer>
+</data-extraction-rules>
