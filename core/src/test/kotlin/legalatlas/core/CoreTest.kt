@@ -125,6 +125,20 @@ class PlannerTest {
     }
 
     @Test
+    fun feynmanItemsTakeAtMostAThirdOfTheSession() {
+        val state = Decks.import(AppState(), deck).state.let {
+            it.copy(unlockedTopics = deck.topics.map { t -> t.id }.toSet(), settings = it.settings.copy(newPerDay = 50))
+        }
+        val plan = planner.plan(state, now, 30)
+        val why = plan.filter { it.feynman }
+        assertTrue(why.isNotEmpty(), "в примере есть развёрнутые вопросы")
+        assertTrue(why.all { Feynman.eligible(it.item) })
+        assertTrue(why.size * Planner.FEYNMAN_SECONDS <= 30 * 60 / 3.0)
+        val off = planner.plan(state.copy(settings = state.settings.copy(feynman = false)), now, 30)
+        assertTrue(off.none { it.feynman })
+    }
+
+    @Test
     fun interleaveAvoidsSameTopicInARow() {
         val items = deck.items.map { PlannedItem(it, Mode.NEW) }
         val out = planner.interleave(items)
@@ -179,5 +193,161 @@ class ProgressTest {
         assertEquals(1, general.introduced)
         assertEquals(1.0 / general.total, general.mastery, 1e-6)
         assertEquals("Гражданское право", general.topic.world)
+    }
+}
+
+class FeynmanTest {
+    @Test
+    fun reasoningCapsTheRating() {
+        assertEquals(Rating.EASY, Feynman.cap(Rating.EASY, Feynman.CORRECT))
+        assertEquals(Rating.GOOD, Feynman.cap(Rating.EASY, Feynman.PARTIAL))
+        assertEquals(Rating.HARD, Feynman.cap(Rating.GOOD, Feynman.WRONG))
+        assertEquals(Rating.HARD, Feynman.cap(Rating.EASY, Feynman.MISSING))
+        assertEquals(Rating.AGAIN, Feynman.cap(Rating.AGAIN, Feynman.CORRECT))
+        assertEquals(Rating.GOOD, Feynman.cap(Rating.GOOD, null))
+    }
+
+    @Test
+    fun referencesGoFromQuoteToOwn() {
+        val item = Item(id = "i", topicId = "t", prompt = "?", answer = "!", rationale = "потому что", rationaleQuote = "«ст. 1»")
+        val state = AppState(myRationales = mapOf("i" to "моё"))
+        assertEquals(
+            listOf(Feynman.Kind.QUOTE, Feynman.Kind.DECK, Feynman.Kind.MINE),
+            Feynman.references(item, state).map { it.kind },
+        )
+        assertTrue(Feynman.references(item.copy(rationale = null, rationaleQuote = null), AppState()).isEmpty())
+    }
+}
+
+class DocTextTest {
+    @Test
+    fun docxParagraphsAreExtracted() {
+        val xml = """<?xml version="1.0"?><w:document><w:body>
+            <w:p><w:r><w:t>Статья 740.</w:t></w:r><w:r><w:t xml:space="preserve"> Договор строительного подряда</w:t></w:r></w:p>
+            <w:p><w:r><w:t>1. По договору &amp; подрядчик</w:t></w:r></w:p></w:body></w:document>"""
+        val bytes = java.io.ByteArrayOutputStream().also { bos ->
+            java.util.zip.ZipOutputStream(bos).use { zip ->
+                zip.putNextEntry(java.util.zip.ZipEntry("word/document.xml"))
+                zip.write(xml.toByteArray())
+                zip.closeEntry()
+            }
+        }.toByteArray()
+        assertEquals("Статья 740. Договор строительного подряда\n1. По договору & подрядчик", DocText.extract("гл37.docx", bytes))
+    }
+
+    @Test
+    fun rtfCyrillicAndUnicodeAreDecoded() {
+        val rtf = "{\\rtf1\\ansi\\ansicpg1251{\\fonttbl{\\f0 Times;}}{\\*\\generator x;}" +
+            "\\pard \\'d1\\'f2\\'e0\\'f2\\'fc\\'ff 740.\\par \\u1055?\\u1086?\\u1076?\\u1088?\\u1103?\\u1076?}"
+        assertEquals("Статья 740.\nПодряд", DocText.extract("doc.rtf", rtf.toByteArray(Charsets.ISO_8859_1)))
+    }
+
+    @Test
+    fun splitKeepsAllTextInRoughlyEqualParts() {
+        val text = (1..40).joinToString("\n") { "Абзац $it " + "текст ".repeat(20) }
+        val parts = DocText.split(text, 4)
+        assertEquals(4, parts.size)
+        assertEquals(text.replace("\n", "").replace(" ", ""), parts.joinToString("").replace("\n", "").replace(" ", ""))
+    }
+}
+
+class DocDeckTest {
+    private val doc = "Статья 740. Договор строительного подряда\n1. По договору строительного подряда подрядчик " +
+        "обязуется в установленный договором срок построить по заданию заказчика определенный объект."
+
+    @Test
+    fun quotesAreVerifiedLooselyButNotInvented() {
+        val norm = DocDeck.normalize(doc)
+        assertTrue(DocDeck.quoteFound("«подрядчик обязуется в установленный договором  срок построить»", norm))
+        assertTrue(DocDeck.quoteFound("подрядчик обязуется … построить по заданию заказчика", norm))
+        assertTrue(!DocDeck.quoteFound("подрядчик обязуется в разумный срок построить объект", norm))
+        assertTrue(!DocDeck.quoteFound("подряд", norm))
+        assertTrue(!DocDeck.quoteFound(null, norm))
+    }
+
+    @Test
+    fun candidatesGetIdsTopicsAndChecks() {
+        val base = Decks.import(AppState(), Decks.parse(File("../examples/sample-deck.json").readText()).deck!!).state
+        val existingTopic = base.topics.keys.first()
+        val existingPrompt = base.items.values.first { it.topicId == existingTopic }.prompt
+        val batches = listOf(
+            GenBatch(
+                newTopics = listOf(GenTopic("n1", "Строительный подряд", "Гражданское право")),
+                items = listOf(
+                    GenItem(topicId = "n1", prompt = "Что обязуется сделать подрядчик?", answer = "Построить объект",
+                        rationaleQuote = "подрядчик обязуется в установленный договором срок построить"),
+                    GenItem(topicId = existingTopic, prompt = existingPrompt, answer = "то же", rationaleQuote = "выдуманная цитата из головы модели"),
+                    GenItem(topicId = "нет такой", prompt = "?", answer = "!"),
+                ),
+            ),
+            GenBatch(newTopics = listOf(GenTopic("x", "строительный  подряд")), items = listOf(
+                GenItem(topicId = "x", format = Formats.CHOICE, options = listOf("один"), prompt = "Срок?", answer = "Договорный"),
+            )),
+        )
+        val (cands, topics) = DocDeck.candidates(base, "doc1", "Глава 37", doc, batches, "2026-10-31")
+        assertEquals(3, cands.size)
+        assertEquals(1, topics.size, "одинаковые названия сводятся в одну книгу")
+        assertEquals(listOf("doc1-001", "doc1-002", "doc1-003"), cands.map { it.item.id })
+        assertTrue(cands[0].recommended && cands[0].newTopic)
+        assertTrue(!cands[1].quoteVerified && cands[1].item.rationaleQuote == null && cands[1].duplicateOf != null)
+        assertEquals(topics[0].id, cands[2].item.topicId)
+        assertEquals(Formats.SELF_CHECK, cands[2].item.format, "choice без вариантов становится self_check")
+
+        val deck = DocDeck.build(base, "doc1", "Глава 37", cands.map { it.item }, topics)
+        val check = Decks.parse(AtlasJson.encodeToString(DeckFile.serializer(), deck))
+        assertTrue(check.ok, check.errors.joinToString())
+        val merged = Decks.import(base, deck).state
+        assertEquals(base.topics[existingTopic]!!.world, merged.topics[existingTopic]!!.world)
+    }
+}
+
+class ReworkTest {
+    @Test
+    fun easyAndWeakItemsAreFound() {
+        val deck = Decks.parse(File("../examples/sample-deck.json").readText()).deck!!
+        var state = Decks.import(AppState(), deck).state
+        val (easyItem, weakItem, retired) = deck.items.take(3)
+        var t = 1_760_000_000_000L
+        state = Progress.record(state, easyItem, Mode.NEW, Rating.EASY, Confidence.SURE, 1000, t)
+        repeat(4) {
+            t = state.cards[easyItem.id]!!.due
+            state = Progress.record(state, easyItem, Mode.REVIEW, Rating.EASY, Confidence.SURE, 1000, t)
+        }
+        var w = 1_760_000_000_000L
+        state = Progress.record(state, weakItem, Mode.NEW, Rating.GOOD, Confidence.SURE, 1000, w)
+        repeat(3) {
+            w += 2 * Fsrs.DAY
+            state = Progress.record(state, weakItem, Mode.REVIEW, Rating.AGAIN, Confidence.SURE, 1000, w, answer = "неверно")
+        }
+        state = Progress.record(state, retired, Mode.NEW, Rating.AGAIN, Confidence.SURE, 1000, w)
+        state = state.copy(retiredItems = setOf(retired.id))
+
+        val a = Rework.analyze(state, t)
+        assertEquals(listOf(easyItem.id), a.easy.map { it.id })
+        assertEquals(listOf(weakItem.id), a.weak.map { it.item.id })
+        assertTrue(a.weak[0].wrongAnswers.contains("неверно"))
+        assertTrue(Planner(ZoneOffset.UTC).plan(state.copy(unlockedTopics = deck.topics.map { it.id }.toSet()), t + 400 * Fsrs.DAY, 60)
+            .none { it.item.id == retired.id }, "убранные вопросы не планируются")
+    }
+}
+
+class BookmarksTest {
+    private val deck = Decks.parse(File("../examples/sample-deck.json").readText()).deck!!
+    private val now = 1_760_000_000_000L
+
+    @Test
+    fun tabsGrowWithProgress() {
+        var state = Decks.import(AppState(), deck).state
+        val topic = deck.topics.first().id
+        fun tabs() = Bookmarks.books(state, now).first { it.mastery.topic.id == topic }.tabs
+        assertEquals(0, tabs(), "закрытая книга")
+        state = state.copy(unlockedTopics = setOf(topic))
+        assertEquals(1, tabs(), "разведка пройдена")
+        deck.items.filter { it.topicId == topic }.forEach {
+            state = Progress.record(state, it, Mode.NEW, Rating.EASY, Confidence.SURE, 1000, now)
+        }
+        assertTrue(tabs() >= 3, "всё пройдено и свежо в памяти: ${tabs()}")
+        val later = Bookmarks.books(state, now + 400 * Fsrs.DAY).first { it.mastery.topic.id == topic }
+        assertEquals(2, later.tabs, "через год без повторений закладки выпадают")
     }
 }

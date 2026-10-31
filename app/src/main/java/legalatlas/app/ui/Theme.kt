@@ -1,32 +1,36 @@
 package legalatlas.app.ui
 
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Typography
-import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.sp
 
+// Светлая палитра: бумага, синий акцент, зелёный для верного, коралловый для ошибок.
 object AtlasColors {
-    val Night = Color(0xFF14161F)
-    val Panel = Color(0xFF1E2130)
-    val Fog = Color(0xFF2A2E3D)
-    val Dim = Color(0xFF3A3550)
-    val Gold = Color(0xFFFFC857)
-    val Mint = Color(0xFF7FD1B9)
-    val Coral = Color(0xFFFF7A6B)
-    val Text = Color(0xFFECEAF4)
-    val Muted = Color(0xFF9A98AA)
+    val Paper = Color(0xFFF5F7FB)
+    val Panel = Color(0xFFFFFFFF)
+    val Fog = Color(0xFFE2E7F0)
+    val Soft = Color(0xFFE4E0F6)
+    val Accent = Color(0xFF2F64C8)
+    val Good = Color(0xFF1C8A5B)
+    val Alert = Color(0xFFC8463A)
+    val Text = Color(0xFF1B2333)
+    val Muted = Color(0xFF5E6878)
 }
 
-private val colors = darkColorScheme(
-    primary = AtlasColors.Gold,
-    onPrimary = AtlasColors.Night,
-    secondary = AtlasColors.Mint,
-    onSecondary = AtlasColors.Night,
-    error = AtlasColors.Coral,
-    background = AtlasColors.Night,
+private val colors = lightColorScheme(
+    primary = AtlasColors.Accent,
+    onPrimary = Color.White,
+    secondary = AtlasColors.Good,
+    onSecondary = Color.White,
+    error = AtlasColors.Alert,
+    background = AtlasColors.Paper,
     onBackground = AtlasColors.Text,
     surface = AtlasColors.Panel,
     onSurface = AtlasColors.Text,
@@ -47,5 +51,8 @@ private val typography = Typography(
 
 @Composable
 fun AtlasTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = colors, typography = typography, content = content)
+    MaterialTheme(colorScheme = colors, typography = typography) {
+        // Surface задаёт цвет текста и значков по умолчанию для всего приложения.
+        Surface(modifier = Modifier.fillMaxSize(), color = AtlasColors.Paper, contentColor = AtlasColors.Text, content = content)
+    }
 }

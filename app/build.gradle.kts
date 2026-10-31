@@ -15,8 +15,8 @@ android {
         applicationId = "legalatlas.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 6
+        versionName = "0.6.0"
     }
 
     signingConfigs {
@@ -73,4 +73,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    // Текст из PDF для создания колоды из документа.
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
 }

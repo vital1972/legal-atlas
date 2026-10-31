@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Резервная копия Android (до Android 12): прогресс и колоды сохраняются, ключи API нет. -->
+<full-backup-content>
+    <include domain="file" path="state.json" />
+    <exclude domain="sharedpref" path="secrets.xml" />
+</full-backup-content>

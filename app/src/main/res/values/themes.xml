@@ -1,7 +1,8 @@
 <resources>
-    <style name="Theme.LegalAtlas" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">@android:color/black</item>
-        <item name="android:statusBarColor">#FF14161F</item>
-        <item name="android:navigationBarColor">#FF14161F</item>
+    <style name="Theme.LegalAtlas" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/paper</item>
+        <item name="android:statusBarColor">@color/paper</item>
+        <item name="android:navigationBarColor">@color/paper</item>
+        <item name="android:windowLightStatusBar">true</item>
     </style>
 </resources>

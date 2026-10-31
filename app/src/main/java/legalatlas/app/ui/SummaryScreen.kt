@@ -27,7 +27,7 @@ fun SummaryScreen(vm: AtlasViewModel) {
     Column(
         Modifier
             .fillMaxSize()
-            .background(AtlasColors.Night)
+            .background(AtlasColors.Paper)
             .safeDrawingPadding()
             .padding(16.dp)
             .verticalScroll(rememberScrollState()),
@@ -44,13 +44,13 @@ fun SummaryScreen(vm: AtlasViewModel) {
                 Spacer(Modifier.height(12.dp))
                 Text(
                     "Область открыта. Её вопросы начнут появляться в обычных сессиях как новые.",
-                    color = AtlasColors.Gold,
+                    color = AtlasColors.Accent,
                     style = MaterialTheme.typography.bodyLarge,
                 )
             }
             if (s.confidentErrors.isNotEmpty()) {
                 Spacer(Modifier.height(20.dp))
-                Text("Уверенные ошибки", style = MaterialTheme.typography.titleMedium, color = AtlasColors.Coral)
+                Text("Уверенные ошибки", style = MaterialTheme.typography.titleMedium, color = AtlasColors.Alert)
                 Text(
                     "Вы были уверены, но ответили неверно. Эти вопросы вернутся уже сегодня.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -58,11 +58,11 @@ fun SummaryScreen(vm: AtlasViewModel) {
                 s.confidentErrors.forEach { item ->
                     Spacer(Modifier.height(10.dp))
                     Text(item.prompt, style = MaterialTheme.typography.bodyMedium)
-                    Text(item.answer, style = MaterialTheme.typography.bodyMedium, color = AtlasColors.Mint)
+                    Text(item.answer, style = MaterialTheme.typography.bodyMedium, color = AtlasColors.Good)
                 }
             }
         }
         Spacer(Modifier.height(24.dp))
-        Button(onClick = vm::closeSummary, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("К карте") }
+        Button(onClick = vm::closeSummary, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("В библиотеку") }
     }
 }
