@@ -27,6 +27,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.Switch
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -148,6 +149,15 @@ fun SettingsScreen(vm: AtlasViewModel) {
         )
         Text("Цель на неделю: ${goal.roundToInt()} мин")
         Slider(value = goal, onValueChange = { goal = it }, valueRange = 30f..300f, steps = 26, onValueChangeFinished = ::save)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Обоснование «почему» (метод Фейнмана)", modifier = Modifier.weight(1f))
+            Switch(checked = settings.feynman, onCheckedChange = { on -> vm.saveSettings(settings.copy(feynman = on)) })
+        }
+        Text(
+            "Часть развёрнутых вопросов после ответа просит объяснить, почему он такой. Такие вопросы занимают не больше трети сессии.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodyMedium,
+        )
 
         HorizontalDivider()
         Text("Колоды", style = MaterialTheme.typography.titleMedium, color = AtlasColors.Accent)

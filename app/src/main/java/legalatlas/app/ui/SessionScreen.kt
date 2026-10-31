@@ -48,6 +48,7 @@ import legalatlas.app.AtlasViewModel
 import legalatlas.app.Phase
 import legalatlas.app.SessionUi
 import legalatlas.core.Confidence
+import legalatlas.core.Feynman
 import legalatlas.core.Formats
 import legalatlas.core.Item
 import legalatlas.core.Mode
@@ -57,9 +58,11 @@ import legalatlas.core.Rating
 @Composable
 fun SessionScreen(vm: AtlasViewModel) {
     val ui by vm.session.collectAsStateWithLifecycle()
+    val state by vm.state.collectAsStateWithLifecycle()
     val session = ui ?: return
     val planned = session.current ?: return
     val item = planned.item
+    val references = remember(item.id, state.myRationales[item.id]) { Feynman.references(item, state) }
 
     Column(
         Modifier
@@ -90,18 +93,36 @@ fun SessionScreen(vm: AtlasViewModel) {
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
         ) {
-            ModeBadge(planned.mode)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ModeBadge(planned.mode)
+                if (planned.feynman) {
+                    Spacer(Modifier.padding(4.dp))
+                    Text("+ почему?", color = AtlasColors.Accent, style = MaterialTheme.typography.labelLarge)
+                }
+            }
             Spacer(Modifier.height(8.dp))
             Text(item.prompt, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Normal)
             Spacer(Modifier.height(16.dp))
             when (session.phase) {
                 Phase.ANSWER -> AnswerInput(vm, session, item)
+                Phase.WHY -> WhyInput(vm, session, item)
                 Phase.GRADING -> Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.height(28.dp))
                     Spacer(Modifier.padding(8.dp))
-                    Text("Проверяю ответ…")
+                    Text(if (planned.feynman) "Проверяю ответ и обоснование…" else "Проверяю ответ…")
                 }
-                Phase.FEEDBACK -> Feedback(session, item)
+                Phase.FEEDBACK -> {
+                    Feedback(session, item)
+                    if (planned.feynman && session.answerText.isNotBlank()) {
+                        Spacer(Modifier.height(16.dp))
+                        ReasoningFeedback(session, item, references, onSaveMine = vm::saveMyRationale)
+                    } else {
+                        item.whyPrompt?.let {
+                            Spacer(Modifier.height(12.dp))
+                            Text("Подумайте: $it", color = AtlasColors.Good)
+                        }
+                    }
+                }
             }
         }
 
@@ -112,6 +133,14 @@ fun SessionScreen(vm: AtlasViewModel) {
                     selfCheck = !Formats.isOpen(item.format) && item.format != Formats.CHOICE,
                     onSubmit = vm::submit,
                 )
+                Phase.WHY -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Button(onClick = vm::submitReasoning, modifier = Modifier.fillMaxWidth().height(56.dp)) {
+                        Text("Проверить ответ и обоснование")
+                    }
+                    TextButton(onClick = { vm.setReasoningText(""); vm.submitReasoning() }) {
+                        Text("Не могу объяснить", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
                 Phase.GRADING -> Unit
                 Phase.FEEDBACK -> RatingButtons(session, item, onRate = vm::rate, onFlag = vm::flagCurrent)
             }
@@ -154,12 +183,6 @@ private fun AnswerInput(vm: AtlasViewModel, session: SessionUi, item: Item) {
             }
         }
         Formats.isOpen(item.format) -> {
-            val speech = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-                if (result.resultCode == Activity.RESULT_OK) {
-                    val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
-                    if (spoken != null) vm.setAnswerText((session.answerText + " " + spoken).trim())
-                }
-            }
             OutlinedTextField(
                 value = session.answerText,
                 onValueChange = vm::setAnswerText,
@@ -168,16 +191,7 @@ private fun AnswerInput(vm: AtlasViewModel, session: SessionUi, item: Item) {
                 textStyle = MaterialTheme.typography.bodyLarge,
             )
             Spacer(Modifier.height(8.dp))
-            OutlinedButton(onClick = {
-                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-                    .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
-                try {
-                    speech.launch(intent)
-                } catch (_: ActivityNotFoundException) {
-                    vm.notify("На телефоне не найдено распознавание речи. Можно диктовать с клавиатуры: значок микрофона на ней.")
-                }
-            }) { Text("Надиктовать") }
+            DictateButton(vm) { spoken -> vm.setAnswerText((session.answerText + " " + spoken).trim()) }
         }
         else -> Text(
             "Вспомните ответ про себя, затем отметьте, насколько уверены.",
@@ -188,6 +202,101 @@ private fun AnswerInput(vm: AtlasViewModel, session: SessionUi, item: Item) {
         Spacer(Modifier.height(12.dp))
         item.hints.take(hintsShown).forEach { Text("Подсказка: $it", color = AtlasColors.Good) }
         if (hintsShown < item.hints.size) TextButton(onClick = { hintsShown++ }) { Text("Подсказка") }
+    }
+}
+
+/** Голосовой ввод: распознанный текст дописывается в поле. */
+@Composable
+private fun DictateButton(vm: AtlasViewModel, onText: (String) -> Unit) {
+    val speech = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let(onText)
+        }
+    }
+    OutlinedButton(onClick = {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
+        try {
+            speech.launch(intent)
+        } catch (_: ActivityNotFoundException) {
+            vm.notify("На телефоне не найдено распознавание речи. Можно диктовать с клавиатуры: значок микрофона на ней.")
+        }
+    }) { Text("Надиктовать") }
+}
+
+/** Шаг Фейнмана: ответ уже дан, теперь объяснить своими словами, почему он такой. */
+@Composable
+private fun WhyInput(vm: AtlasViewModel, session: SessionUi, item: Item) {
+    Text("Ваш ответ", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text(session.answerText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Spacer(Modifier.height(16.dp))
+    Text("Почему так?", style = MaterialTheme.typography.titleMedium, color = AtlasColors.Accent)
+    Text(
+        item.whyPrompt ?: "Объясните, как новичку: на какой норме или принципе держится ответ и как из них следует вывод.",
+        style = MaterialTheme.typography.bodyMedium,
+    )
+    Spacer(Modifier.height(8.dp))
+    OutlinedTextField(
+        value = session.reasoningText,
+        onValueChange = vm::setReasoningText,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp),
+        placeholder = { Text("Потому что…") },
+        textStyle = MaterialTheme.typography.bodyLarge,
+    )
+    Spacer(Modifier.height(8.dp))
+    DictateButton(vm) { spoken -> vm.setReasoningText((session.reasoningText + " " + spoken).trim()) }
+}
+
+/** Разбор обоснования: оценка, замечание и верное обоснование с указанием, откуда оно. */
+@Composable
+private fun ReasoningFeedback(session: SessionUi, item: Item, references: List<Feynman.Reference>, onSaveMine: () -> Unit) {
+    val graded = session.grade?.reasoning
+    Text("Обоснование", style = MaterialTheme.typography.titleMedium, color = AtlasColors.Accent)
+    if (graded != null) {
+        val (label, color) = when (graded.status) {
+            Feynman.CORRECT -> "Обоснование верное" to AtlasColors.Good
+            Feynman.PARTIAL -> "Обоснование неполное: оценка не выше «Вспомнил»" to AtlasColors.Accent
+            Feynman.WRONG -> "Обоснование неверное: оценка не выше «С трудом»" to AtlasColors.Alert
+            else -> "Обоснования нет: оценка не выше «С трудом»" to AtlasColors.Alert
+        }
+        Spacer(Modifier.height(6.dp))
+        Banner(label, color)
+        if (graded.feedback.isNotBlank()) {
+            Spacer(Modifier.height(8.dp))
+            Text(graded.feedback, style = MaterialTheme.typography.bodyLarge)
+        }
+    } else if (session.reasoningText.isNotBlank()) {
+        Text(
+            "Обоснование не проверено автоматически. Сравните его с верным ниже.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    if (session.reasoningText.isNotBlank()) {
+        Spacer(Modifier.height(8.dp))
+        Text("Ваше обоснование: ${session.reasoningText}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    references.forEach { ref ->
+        Spacer(Modifier.height(10.dp))
+        val title = when (ref.kind) {
+            Feynman.Kind.QUOTE -> "Цитата из источника" +
+                (listOfNotNull(item.source?.title, item.source?.locator).joinToString(", ").takeIf { it.isNotBlank() }?.let { " ($it)" } ?: "")
+            Feynman.Kind.DECK -> "Верное обоснование"
+            Feynman.Kind.MINE -> "Ваше сохранённое обоснование"
+        }
+        Text(title, style = MaterialTheme.typography.labelLarge, color = AtlasColors.Good)
+        Text(ref.text, style = MaterialTheme.typography.bodyLarge)
+    }
+    val modelRationale = graded?.modelRationale?.takeIf { it.isNotBlank() }
+    if (modelRationale != null && references.none { it.kind != Feynman.Kind.MINE }) {
+        Spacer(Modifier.height(10.dp))
+        Text("Объяснение модели. Сверьте с источником", style = MaterialTheme.typography.labelLarge, color = AtlasColors.Muted)
+        Text(modelRationale, style = MaterialTheme.typography.bodyLarge)
+    }
+    val canSave = graded?.status == Feynman.CORRECT && session.reasoningText.isNotBlank() &&
+        references.none { it.kind != Feynman.Kind.MINE }
+    if (canSave) {
+        TextButton(onClick = onSaveMine) { Text("Сохранить моё обоснование как эталон") }
     }
 }
 
@@ -258,10 +367,6 @@ private fun Feedback(session: SessionUi, item: Item) {
     item.explanation?.let {
         Spacer(Modifier.height(8.dp))
         Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-    item.whyPrompt?.let {
-        Spacer(Modifier.height(12.dp))
-        Text("Подумайте: $it", color = AtlasColors.Good)
     }
     val source = listOfNotNull(item.source?.title, item.source?.locator).joinToString(", ")
     if (source.isNotBlank() || item.norms.isNotEmpty()) {

@@ -17,6 +17,7 @@ import legalatlas.core.AppState
 import legalatlas.core.AtlasJson
 import legalatlas.core.Confidence
 import legalatlas.core.Decks
+import legalatlas.core.Feynman
 import legalatlas.core.Formats
 import legalatlas.core.Fsrs
 import legalatlas.core.Item
@@ -35,7 +36,8 @@ sealed interface Screen {
     data object Settings : Screen
 }
 
-enum class Phase { ANSWER, GRADING, FEEDBACK }
+/** WHY — шаг Фейнмана: после ответа объяснить, почему он такой. */
+enum class Phase { ANSWER, WHY, GRADING, FEEDBACK }
 
 data class SessionUi(
     val items: List<PlannedItem>,
@@ -43,6 +45,7 @@ data class SessionUi(
     val index: Int = 0,
     val phase: Phase = Phase.ANSWER,
     val answerText: String = "",
+    val reasoningText: String = "",
     val selectedOption: Int? = null,
     val confidence: Confidence? = null,
     val grade: GradeResult? = null,
@@ -284,12 +287,14 @@ class AtlasViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setAnswerText(text: String) = _session.update { it?.copy(answerText = text) }
+    fun setReasoningText(text: String) = _session.update { it?.copy(reasoningText = text) }
     fun selectOption(i: Int) = _session.update { it?.copy(selectedOption = i) }
 
     /** Ответ отправляется вместе с уверенностью: кнопки «уверен / думаю / наугад». */
     fun submit(confidence: Confidence) {
         val ui = _session.value ?: return
-        val item = ui.current?.item ?: return
+        val planned = ui.current ?: return
+        val item = planned.item
         when {
             item.format == Formats.CHOICE -> {
                 val correct = ui.selectedOption == item.correctOption
@@ -299,26 +304,47 @@ class AtlasViewModel(app: Application) : AndroidViewModel(app) {
                     suggested = Progress.choiceRating(correct, confidence),
                 )
             }
+            planned.feynman && Formats.isOpen(item.format) && ui.answerText.isNotBlank() ->
+                _session.value = ui.copy(confidence = confidence, phase = Phase.WHY)
             Formats.isOpen(item.format) && ui.answerText.isNotBlank() && canGrade() -> {
                 _session.value = ui.copy(confidence = confidence, phase = Phase.GRADING)
-                grade(item, ui.answerText)
+                grade(item, ui.answerText, null)
             }
             else -> _session.value = ui.copy(confidence = confidence, phase = Phase.FEEDBACK)
         }
     }
 
-    private fun grade(item: Item, answer: String) {
-        val settings = _state.value.settings
+    /** Обоснование отправлено (пустое — «не могу объяснить»): оцениваются ответ и обоснование вместе. */
+    fun submitReasoning() {
+        val ui = _session.value ?: return
+        val item = ui.current?.item ?: return
+        if (ui.phase != Phase.WHY) return
+        if (canGrade()) {
+            _session.value = ui.copy(phase = Phase.GRADING)
+            grade(item, ui.answerText, ui.reasoningText.trim())
+        } else {
+            _session.value = ui.copy(phase = Phase.FEEDBACK)
+        }
+    }
+
+    private fun grade(item: Item, answer: String, reasoning: String?) {
+        val state = _state.value
+        val settings = state.settings
         val key = secrets.get(SecretStore.DEEPSEEK)
+        val references = Feynman.references(item, state)
         viewModelScope.launch {
             // Ключ на телефоне важнее сервера: так оценка работает и без него.
+            // Сервер обоснования не проверяет: там остаётся сравнение с эталоном вручную.
             val result = runCatching {
-                if (key != null) Grader(key).grade(item, answer) else Api(settings.serverUrl, settings.token).grade(item, answer)
+                if (key != null) Grader(key).grade(item, answer, reasoning, references)
+                else Api(settings.serverUrl, settings.token).grade(item, answer)
             }
             _session.update { ui ->
                 if (ui == null || ui.current?.item?.id != item.id) return@update ui
                 result.fold(
-                    onSuccess = { ui.copy(phase = Phase.FEEDBACK, grade = it, suggested = Rating.of(it.rating)) },
+                    onSuccess = {
+                        ui.copy(phase = Phase.FEEDBACK, grade = it, suggested = Feynman.cap(Rating.of(it.rating), it.reasoning?.status))
+                    },
                     onFailure = { ui.copy(phase = Phase.FEEDBACK, gradeError = "Оценка недоступна (${it.message}). Сравните с эталоном и оцените сами.") },
                 )
             }
@@ -337,9 +363,20 @@ class AtlasViewModel(app: Application) : AndroidViewModel(app) {
                 score = ui.grade?.score,
                 answer = ui.answerText.takeIf { a -> a.isNotBlank() }
                     ?: ui.selectedOption?.let { i -> planned.item.options.getOrNull(i) },
+                reasoning = ui.reasoningText.takeIf { planned.feynman && ui.confidence != null && ui.answerText.isNotBlank() },
+                reasoningStatus = ui.grade?.reasoning?.status,
             )
         }
         next(ui, rating, confidence)
+    }
+
+    /** Сохранить своё обоснование как эталон для этого вопроса (когда в колоде эталона нет). */
+    fun saveMyRationale() {
+        val ui = _session.value ?: return
+        val item = ui.current?.item ?: return
+        val text = ui.reasoningText.trim().takeIf { it.isNotEmpty() } ?: return
+        update { it.copy(myRationales = it.myRationales + (item.id to text)) }
+        _message.value = "Обоснование сохранено. В следующий раз ответ будут сравнивать и с ним."
     }
 
     /** «Вопрос неверен»: убрать из повторений до исправления колоды. */
@@ -357,6 +394,7 @@ class AtlasViewModel(app: Application) : AndroidViewModel(app) {
             index = ui.index + 1,
             phase = Phase.ANSWER,
             answerText = "",
+            reasoningText = "",
             selectedOption = null,
             confidence = null,
             grade = null,

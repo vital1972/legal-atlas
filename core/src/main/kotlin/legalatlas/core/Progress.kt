@@ -49,6 +49,8 @@ object Progress {
         now: Long,
         score: Double? = null,
         answer: String? = null,
+        reasoning: String? = null,
+        reasoningStatus: String? = null,
     ): AppState {
         val fsrs = Fsrs(desiredRetention = state.settings.desiredRetention)
         val cards = if (mode == Mode.PRETEST) state.cards else {
@@ -66,6 +68,8 @@ object Progress {
             mode = mode.name,
             score = score,
             answer = answer,
+            reasoning = reasoning,
+            reasoningStatus = reasoningStatus,
         )
         return state.copy(cards = cards, logs = state.logs + log)
     }

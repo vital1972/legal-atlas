@@ -7,12 +7,15 @@ import java.time.temporal.IsoFields
 
 enum class Mode { REVIEW, NEW, AHEAD, PRETEST }
 
-data class PlannedItem(val item: Item, val mode: Mode)
+/** feynman: после ответа попросить обоснование «почему». */
+data class PlannedItem(val item: Item, val mode: Mode, val feynman: Boolean = false)
 
 /**
  * Собирает сессию под выбранное время: сначала то, что вот-вот забудется,
  * затем новое из открытых областей (не больше дневного лимита), а если время
  * осталось — досрочное повторение самых слабых вопросов.
+ * Часть развёрнутых вопросов идёт с обоснованием по Фейнману: это дольше,
+ * поэтому такие вопросы занимают не больше трети времени сессии.
  */
 class Planner(
     private val zone: ZoneId = ZoneId.systemDefault(),
@@ -21,16 +24,27 @@ class Planner(
         val fsrs = Fsrs(desiredRetention = state.settings.desiredRetention)
         val budget = budgetMinutes * 60.0
         var used = 0.0
+        var feynmanUsed = 0.0
         val picked = mutableListOf<PlannedItem>()
         val usable = state.items.values.filter { it.id !in state.flaggedItems }
+
+        fun withWhy(item: Item) = state.settings.feynman && Feynman.eligible(item) &&
+            feynmanUsed + FEYNMAN_SECONDS <= budget * FEYNMAN_SHARE
+        fun cost(item: Item) = if (withWhy(item)) FEYNMAN_SECONDS else secondsFor(item)
+        fun add(item: Item, mode: Mode) {
+            val why = withWhy(item)
+            val c = cost(item)
+            picked += PlannedItem(item, mode, why)
+            used += c
+            if (why) feynmanUsed += c
+        }
 
         val withCards = usable.mapNotNull { item -> state.cards[item.id]?.let { item to it } }
         val due = withCards.filter { it.second.due <= now }
             .sortedBy { fsrs.retrievability(it.second, now) }
         for ((item, _) in due) {
-            if (used + secondsFor(item) > budget * REVIEW_SHARE && picked.isNotEmpty()) break
-            picked += PlannedItem(item, Mode.REVIEW)
-            used += secondsFor(item)
+            if (used + cost(item) > budget * REVIEW_SHARE && picked.isNotEmpty()) break
+            add(item, Mode.REVIEW)
         }
 
         val newLeft = state.settings.newPerDay - introducedToday(state, now)
@@ -38,9 +52,8 @@ class Planner(
             val fresh = orderedItems(state)
                 .filter { it.id !in state.cards && it.id !in state.flaggedItems && it.topicId in state.unlockedTopics }
             for (item in fresh.take(newLeft)) {
-                if (used + secondsFor(item) > budget) break
-                picked += PlannedItem(item, Mode.NEW)
-                used += secondsFor(item)
+                if (used + cost(item) > budget) break
+                add(item, Mode.NEW)
             }
         }
 
@@ -52,9 +65,8 @@ class Planner(
                 .filter { it.second < AHEAD_MAX_R }
                 .sortedBy { it.second }
             for ((pair, _) in ahead) {
-                if (used + secondsFor(pair.first) > budget) break
-                picked += PlannedItem(pair.first, Mode.AHEAD)
-                used += secondsFor(pair.first)
+                if (used + cost(pair.first) > budget) break
+                add(pair.first, Mode.AHEAD)
             }
         }
         return interleave(picked)
@@ -109,6 +121,8 @@ class Planner(
         private const val AHEAD_MAX_R = 0.95
         private val MIN_AHEAD_GAP = ChronoUnit.HOURS.duration.toMillis() * 12
         private const val MAX_COUNTED_MS = 5 * 60_000L
+        const val FEYNMAN_SECONDS = 180.0
+        const val FEYNMAN_SHARE = 1.0 / 3
 
         fun secondsFor(item: Item): Double = when {
             Formats.isOpen(item.format) -> 100.0

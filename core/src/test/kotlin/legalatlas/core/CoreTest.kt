@@ -125,6 +125,20 @@ class PlannerTest {
     }
 
     @Test
+    fun feynmanItemsTakeAtMostAThirdOfTheSession() {
+        val state = Decks.import(AppState(), deck).state.let {
+            it.copy(unlockedTopics = deck.topics.map { t -> t.id }.toSet(), settings = it.settings.copy(newPerDay = 50))
+        }
+        val plan = planner.plan(state, now, 30)
+        val why = plan.filter { it.feynman }
+        assertTrue(why.isNotEmpty(), "в примере есть развёрнутые вопросы")
+        assertTrue(why.all { Feynman.eligible(it.item) })
+        assertTrue(why.size * Planner.FEYNMAN_SECONDS <= 30 * 60 / 3.0)
+        val off = planner.plan(state.copy(settings = state.settings.copy(feynman = false)), now, 30)
+        assertTrue(off.none { it.feynman })
+    }
+
+    @Test
     fun interleaveAvoidsSameTopicInARow() {
         val items = deck.items.map { PlannedItem(it, Mode.NEW) }
         val out = planner.interleave(items)
@@ -179,5 +193,28 @@ class ProgressTest {
         assertEquals(1, general.introduced)
         assertEquals(1.0 / general.total, general.mastery, 1e-6)
         assertEquals("Гражданское право", general.topic.world)
+    }
+}
+
+class FeynmanTest {
+    @Test
+    fun reasoningCapsTheRating() {
+        assertEquals(Rating.EASY, Feynman.cap(Rating.EASY, Feynman.CORRECT))
+        assertEquals(Rating.GOOD, Feynman.cap(Rating.EASY, Feynman.PARTIAL))
+        assertEquals(Rating.HARD, Feynman.cap(Rating.GOOD, Feynman.WRONG))
+        assertEquals(Rating.HARD, Feynman.cap(Rating.EASY, Feynman.MISSING))
+        assertEquals(Rating.AGAIN, Feynman.cap(Rating.AGAIN, Feynman.CORRECT))
+        assertEquals(Rating.GOOD, Feynman.cap(Rating.GOOD, null))
+    }
+
+    @Test
+    fun referencesGoFromQuoteToOwn() {
+        val item = Item(id = "i", topicId = "t", prompt = "?", answer = "!", rationale = "потому что", rationaleQuote = "«ст. 1»")
+        val state = AppState(myRationales = mapOf("i" to "моё"))
+        assertEquals(
+            listOf(Feynman.Kind.QUOTE, Feynman.Kind.DECK, Feynman.Kind.MINE),
+            Feynman.references(item, state).map { it.kind },
+        )
+        assertTrue(Feynman.references(item.copy(rationale = null, rationaleQuote = null), AppState()).isEmpty())
     }
 }

@@ -37,6 +37,17 @@ data class GradeResult(
     val score: Double = 0.0,
     val rating: Int = 1,
     val feedback: String = "",
+    /** Есть, только если пользователь давал обоснование по Фейнману. */
+    val reasoning: ReasoningGrade? = null,
+)
+
+@Serializable
+data class ReasoningGrade(
+    /** correct, partial, wrong или missing — см. legalatlas.core.Feynman. */
+    val status: String = "missing",
+    val feedback: String = "",
+    /** Верное обоснование от модели: показывается с пометкой, если в колоде эталона нет. */
+    @SerialName("model_rationale") val modelRationale: String? = null,
 )
 
 @Serializable

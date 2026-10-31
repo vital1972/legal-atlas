@@ -57,6 +57,10 @@ data class Item(
     @SerialName("common_errors") val commonErrors: List<String> = emptyList(),
     val explanation: String? = null,
     @SerialName("why_prompt") val whyPrompt: String? = null,
+    /** Эталонное обоснование: почему ответ именно такой (норма, принцип, логика). */
+    val rationale: String? = null,
+    /** Дословная цитата из источника, на которой держится ответ. */
+    @SerialName("rationale_quote") val rationaleQuote: String? = null,
     val hints: List<String> = emptyList(),
     val options: List<String> = emptyList(),
     @SerialName("correct_option") val correctOption: Int? = null,
@@ -113,6 +117,9 @@ data class ReviewLog(
     val mode: String,
     val score: Double? = null,
     val answer: String? = null,
+    /** Обоснование по методу Фейнмана и его оценка: correct, partial, wrong, missing. */
+    val reasoning: String? = null,
+    val reasoningStatus: String? = null,
 )
 
 @Serializable
@@ -122,6 +129,8 @@ data class Settings(
     val newPerDay: Int = 12,
     val desiredRetention: Double = 0.9,
     val weeklyGoalMinutes: Int = 120,
+    /** Просить обоснование «почему» у части развёрнутых вопросов. */
+    val feynman: Boolean = true,
 )
 
 /** Всё, что приложение хранит на телефоне. */
@@ -132,6 +141,8 @@ data class AppState(
     val logs: List<ReviewLog> = emptyList(),
     val unlockedTopics: Set<String> = emptySet(),
     val flaggedItems: Set<String> = emptySet(),
+    /** Обоснования, которые пользователь сохранил как свой эталон, по id вопроса. */
+    val myRationales: Map<String, String> = emptyMap(),
     val settings: Settings = Settings(),
     val lastDeckSync: Long = 0,
     val syncedLogCount: Int = 0,
