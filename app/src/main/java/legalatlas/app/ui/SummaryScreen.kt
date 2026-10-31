@@ -63,6 +63,6 @@ fun SummaryScreen(vm: AtlasViewModel) {
             }
         }
         Spacer(Modifier.height(24.dp))
-        Button(onClick = vm::closeSummary, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("К карте") }
+        Button(onClick = vm::closeSummary, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("В библиотеку") }
     }
 }

@@ -463,8 +463,8 @@ class AtlasViewModel(app: Application) : AndroidViewModel(app) {
         val plan = planner.plan(source, System.currentTimeMillis(), minutes)
         if (plan.isEmpty()) {
             _message.value = if (s.unlockedTopics.isEmpty() && s.cards.isEmpty())
-                "Сначала откройте область на карте: нажмите на неё и пройдите разведку."
-            else "Сейчас повторять нечего. Откройте новую область или загрузите вопросы."
+                "Сначала откройте книгу: нажмите на неё и пройдите разведку."
+            else "Сейчас повторять нечего. Откройте новую книгу или добавьте вопросы."
             return
         }
         val title = topicId?.let { s.topics[it]?.title } ?: "Сессия на $minutes мин"
@@ -476,7 +476,7 @@ class AtlasViewModel(app: Application) : AndroidViewModel(app) {
         val s = _state.value
         val plan = planner.pretest(s, topicId)
         if (plan.isEmpty()) {
-            _message.value = "В этой области пока нет вопросов"
+            _message.value = "В этой книге пока нет вопросов"
             return
         }
         _session.value = SessionUi(items = plan, title = "Разведка: ${s.topics[topicId]?.title}", pretestTopic = topicId)

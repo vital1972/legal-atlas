@@ -3,9 +3,7 @@ package legalatlas.app.ui
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,13 +12,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -32,7 +30,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,21 +38,18 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlin.math.roundToInt
 import legalatlas.app.AtlasViewModel
 import legalatlas.app.Screen
-import legalatlas.core.HexLayout
+import legalatlas.core.Book
+import legalatlas.core.Bookmarks
 import legalatlas.core.Planner
-import legalatlas.core.Progress
-import legalatlas.core.TopicMastery
 
 @Composable
 fun HomeScreen(vm: AtlasViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
     val now = remember(state) { System.currentTimeMillis() }
     val planner = remember { Planner() }
-    val mastery = remember(state) { Progress.topics(state, now) }
-    val worlds = remember(mastery) { mastery.mapNotNull { it.topic.world }.distinct().sorted() }
-    var world by rememberSaveable { mutableStateOf<String?>(null) }
-    val currentWorld = world?.takeIf { it in worlds } ?: worlds.firstOrNull()
-    var selected by remember { mutableStateOf<TopicMastery?>(null) }
+    val books = remember(state) { Bookmarks.books(state, now) }
+    val worlds = remember(books) { books.map { it.mastery.topic.world ?: "Без отрасли" }.distinct().sorted() }
+    var selected by remember { mutableStateOf<Book?>(null) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::importUri) }
     val docTypes = arrayOf(
         "application/pdf",
@@ -99,35 +93,12 @@ fun HomeScreen(vm: AtlasViewModel) {
             )
         }
 
-        if (worlds.size > 1) {
-            Row(
-                Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                worlds.forEach { w ->
-                    val inWorld = mastery.filter { it.topic.world == w }
-                    val pct = if (inWorld.isEmpty()) 0 else (inWorld.sumOf { it.mastery } / inWorld.size * 100).roundToInt()
-                    FilterChip(selected = w == currentWorld, onClick = { world = w }, label = { Text("$w · $pct%") })
-                }
+        LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp)) {
+            items(worlds, key = { it }) { w ->
+                val onShelf = books.filter { (it.mastery.topic.world ?: "Без отрасли") == w }
+                    .sortedWith(compareBy({ it.locked }, { it.mastery.topic.title }))
+                Shelf(w, LibraryColors.covers[worlds.indexOf(w) % LibraryColors.covers.size], onShelf) { selected = it }
             }
-        } else {
-            Text(
-                currentWorld.orEmpty(),
-                style = MaterialTheme.typography.titleMedium,
-                color = AtlasColors.Accent,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-            )
-        }
-
-        val worldTopics = mastery.filter { it.topic.world == currentWorld }
-        val cells = remember(worldTopics.map { it.topic }) { HexLayout.layout(worldTopics.map { it.topic }) }
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            MapCanvas(
-                cells = cells,
-                topics = worldTopics.associateBy { it.topic.id },
-                onTap = { id -> selected = worldTopics.firstOrNull { it.topic.id == id } },
-                modifier = Modifier.fillMaxSize(),
-            )
         }
 
         Text(
@@ -142,12 +113,12 @@ fun HomeScreen(vm: AtlasViewModel) {
         }
     }
 
-    selected?.let { tm ->
+    selected?.let { book ->
         TopicDialog(
-            tm = tm,
+            book = book,
             onDismiss = { selected = null },
-            onPretest = { selected = null; vm.startPretest(tm.topic.id) },
-            onPractice = { selected = null; vm.startSession(15, tm.topic.id) },
+            onPretest = { selected = null; vm.startPretest(book.mastery.topic.id) },
+            onPractice = { selected = null; vm.startSession(15, book.mastery.topic.id) },
         )
     }
 }
@@ -168,18 +139,31 @@ private fun EmptyAtlas(onSample: () -> Unit, onFile: () -> Unit) {
     }
 }
 
+/** Что нужно для следующей закладки. */
+private fun nextTab(book: Book): String? = when (book.tabs) {
+    1 -> "Следующая закладка: пройти каждый вопрос книги хотя бы раз."
+    2 -> "Следующая закладка: вспоминать не меньше 70% вопросов."
+    3 -> "Следующая закладка: не меньше 85% и верные обоснования «почему»."
+    4 -> "Последняя закладка: не меньше 90% и интервалы больше месяца."
+    else -> null
+}
+
 @Composable
-private fun TopicDialog(tm: TopicMastery, onDismiss: () -> Unit, onPretest: () -> Unit, onPractice: () -> Unit) {
+private fun TopicDialog(book: Book, onDismiss: () -> Unit, onPretest: () -> Unit, onPractice: () -> Unit) {
+    val tm = book.mastery
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(tm.topic.title) },
         text = {
             Column {
                 if (!tm.unlocked) {
-                    Text("Область под туманом. Разведка: несколько вопросов на угадывание до изучения. Ошибаться можно, это помогает запомнить. После разведки область откроется.")
+                    Text("Книга закрыта. Разведка: несколько вопросов на угадывание до изучения. Ошибаться можно, это помогает запомнить. После разведки книга откроется и получит первую закладку.")
                     Spacer(Modifier.height(8.dp))
-                    Text("Вопросов в области: ${tm.total}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Вопросов в книге: ${tm.total}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
+                    Text("Закладок: ${book.tabs} из 5" + if (book.fading) " (последняя бледнеет: пора повторить)" else "")
+                    nextTab(book)?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    Spacer(Modifier.height(8.dp))
                     Text("Освоено: ${(tm.mastery * 100).roundToInt()}%")
                     Text("Изучено вопросов: ${tm.introduced} из ${tm.total}")
                     if (tm.introduced > 0) Text("Вспомните сегодня: ${(tm.recall * 100).roundToInt()}% изученного")
@@ -188,7 +172,7 @@ private fun TopicDialog(tm: TopicMastery, onDismiss: () -> Unit, onPretest: () -
             }
         },
         confirmButton = {
-            if (tm.unlocked) TextButton(onClick = onPractice) { Text("Заняться областью") }
+            if (tm.unlocked) TextButton(onClick = onPractice) { Text("Заняться книгой") }
             else TextButton(onClick = onPretest) { Text("Разведка") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Закрыть") } },

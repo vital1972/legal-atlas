@@ -330,3 +330,24 @@ class ReworkTest {
             .none { it.item.id == retired.id }, "убранные вопросы не планируются")
     }
 }
+
+class BookmarksTest {
+    private val deck = Decks.parse(File("../examples/sample-deck.json").readText()).deck!!
+    private val now = 1_760_000_000_000L
+
+    @Test
+    fun tabsGrowWithProgress() {
+        var state = Decks.import(AppState(), deck).state
+        val topic = deck.topics.first().id
+        fun tabs() = Bookmarks.books(state, now).first { it.mastery.topic.id == topic }.tabs
+        assertEquals(0, tabs(), "закрытая книга")
+        state = state.copy(unlockedTopics = setOf(topic))
+        assertEquals(1, tabs(), "разведка пройдена")
+        deck.items.filter { it.topicId == topic }.forEach {
+            state = Progress.record(state, it, Mode.NEW, Rating.EASY, Confidence.SURE, 1000, now)
+        }
+        assertTrue(tabs() >= 3, "всё пройдено и свежо в памяти: ${tabs()}")
+        val later = Bookmarks.books(state, now + 400 * Fsrs.DAY).first { it.mastery.topic.id == topic }
+        assertEquals(2, later.tabs, "через год без повторений закладки выпадают")
+    }
+}
