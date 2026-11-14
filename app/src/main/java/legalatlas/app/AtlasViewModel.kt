@@ -263,7 +263,7 @@ class AtlasViewModel(app: Application) : AndroidViewModel(app) {
                         _gen.update { it?.copy(progress = if (done < total) "Придумываю вопросы: ${done + 1} из $total…" else "Проверяю…") }
                     }
                 } else {
-                    generator.generate(plan, g.docTitle, g.focus, DocDeck.existingTopics(state)) { done, total ->
+                    generator.generate(plan, g.docTitle, g.focus, DocDeck.existingTopics(state), lite = state.settings.lite) { done, total ->
                         _gen.update { it?.copy(progress = if (done < total) "Читаю часть ${done + 1} из $total…" else "Проверяю цитаты…") }
                     }
                 }
@@ -281,13 +281,18 @@ class AtlasViewModel(app: Application) : AndroidViewModel(app) {
                             error = if (cands.isEmpty()) "Модель не предложила ни одного вопроса. Попробуйте другой фрагмент или уточните акцент." else null,
                         )
                     }
+                    // В лайт-режиме проверенные вопросы добавляются сразу, без просмотра списка.
+                    val ready = cands.filter { c -> c.recommended }
+                    if (state.settings.lite && g.mode == GenMode.DOCUMENT && ready.isNotEmpty()) {
+                        addSelected(skipped = cands.size - ready.size)
+                    }
                 },
                 onFailure = { e -> _gen.update { it?.copy(running = false, progress = null, error = e.message ?: "Ошибка") } },
             )
         }
     }
 
-    fun addSelected() {
+    fun addSelected(skipped: Int = 0) {
         val g = _gen.value ?: return
         val chosen = g.candidates.filter { it.item.id in g.selected }.map { it.item }
         if (chosen.isEmpty()) return
@@ -308,6 +313,7 @@ class AtlasViewModel(app: Application) : AndroidViewModel(app) {
             val intoExisting = chosen.count { c -> g.newTopics.none { it.id == c.topicId } }
             if (intoExisting > 0) append(" В существующие книги: $intoExisting.")
             if (_state.value.settings.lite) append(" Они ждут в «Ознакомиться».")
+            if (skipped > 0) append(" Не добавлено $skipped: цитата не найдена в документе или вопрос повторяет уже имеющийся.")
             else if (newBooks > 0) append(" Новых книг: $newBooks. Они закрыты: начните с разведки.")
         }
     }

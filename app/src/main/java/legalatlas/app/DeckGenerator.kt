@@ -24,14 +24,16 @@ class DeckGenerator(apiKey: String) {
         docTitle: String,
         focus: String,
         existing: List<GenTopic>,
+        lite: Boolean = false,
         onProgress: (done: Int, total: Int) -> Unit,
     ): List<GenBatch> {
+        val system = if (lite) SYSTEM + "\n\n" + LITE_RULES else SYSTEM
         val known = existing.toMutableList()
         val out = mutableListOf<GenBatch>()
         plan.parts.forEachIndexed { i, part ->
             onProgress(i, plan.parts.size)
             val content = client.json(
-                system = SYSTEM,
+                system = system,
                 user = userPrompt(docTitle, focus, part, i + 1, plan.parts.size, plan.perPart, known),
                 maxTokens = 8000,
                 timeoutMs = 180_000,
@@ -106,6 +108,22 @@ class DeckGenerator(apiKey: String) {
                короткое название до 6 слов, world — отрасль права («Гражданское право», «Арбитражный процесс» и т. п.).
             9. pretest: true у 1–2 вопросов на каждую новую книгу: простые, но неочевидные.
             10. choice: 3–4 правдоподобных варианта, correct_option — индекс верного с нуля.
+        """.trimIndent()
+
+        /**
+         * Лайт-режим: ответ не пишется и не оценивается моделью, пользователь вспоминает про себя
+         * и сам сверяет с эталоном. Поэтому вопрос должен быть коротким, а эталон — сверяемым.
+         */
+        private val LITE_RULES = """
+            Особые правила (лайт-режим, они важнее правил 2, 3 и 10):
+            - Все вопросы format = "self_check". Вариантов ответа нет: options пустой, correct_option null.
+            - Вопрос такой, чтобы ответ можно было вспомнить про себя за 10–30 секунд.
+            - answer — 1–3 коротких предложения, которые легко сверить со своим ответом: сначала суть
+              (да/нет, срок, условие, кто прав), затем норма или пункт обзора.
+            - key_points — 1–3 главных тезиса ответа.
+            - Если фрагмент — обзор судебной практики, постановление Пленума или судебный акт: на каждую
+              правовую позицию 1–2 вопроса вида «ситуация из дела → как решил суд и почему».
+              Ситуацию излагай коротко, без названий сторон. В locator — номер пункта обзора или постановления.
         """.trimIndent()
 
         private val DEEPEN_SYSTEM = """
