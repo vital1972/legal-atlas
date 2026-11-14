@@ -17,6 +17,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import legalatlas.app.ui.AtlasTheme
 import legalatlas.app.ui.GenerateScreen
 import legalatlas.app.ui.HomeScreen
+import legalatlas.app.ui.LiteHome
+import legalatlas.app.ui.LiteScreen
 import legalatlas.app.ui.ReworkScreen
 import legalatlas.app.ui.SessionScreen
 import legalatlas.app.ui.SettingsScreen
@@ -61,9 +63,14 @@ class MainActivity : ComponentActivity() {
 private fun App(vm: AtlasViewModel) {
     val screen by vm.screen.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
+    val state by vm.state.collectAsStateWithLifecycle()
 
     when (screen) {
-        Screen.Home -> HomeScreen(vm)
+        Screen.Home -> if (state.settings.lite) LiteHome(vm) else HomeScreen(vm)
+        Screen.Lite -> {
+            BackHandler { vm.liteClose() }
+            LiteScreen(vm)
+        }
         Screen.Session -> {
             BackHandler { vm.finish() }
             SessionScreen(vm)

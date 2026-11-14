@@ -92,7 +92,7 @@ fun SettingsScreen(vm: AtlasViewModel) {
             Text("Настройки", style = MaterialTheme.typography.titleLarge)
         }
 
-        Text("Оценка ответов", style = MaterialTheme.typography.titleMedium, color = AtlasColors.Accent)
+        Text(if (settings.lite) "Ключ DeepSeek" else "Оценка ответов", style = MaterialTheme.typography.titleMedium, color = AtlasColors.Accent)
         Text(
             if (keyHint != null) "Ключ DeepSeek сохранён ($keyHint). Развёрнутые ответы оцениваются прямо с телефона."
             else "Вставьте ключ DeepSeek (platform.deepseek.com → API keys), и развёрнутые ответы будут оцениваться без сервера.",
@@ -137,6 +137,19 @@ fun SettingsScreen(vm: AtlasViewModel) {
         Button(onClick = { save(); vm.sync() }, enabled = !busy, modifier = Modifier.fillMaxWidth().height(52.dp)) {
             Text(if (busy) "Синхронизация…" else "Сохранить и синхронизировать")
         }
+
+        HorizontalDivider()
+        Text("Режим", style = MaterialTheme.typography.titleMedium, color = AtlasColors.Accent)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Лайт-режим", modifier = Modifier.weight(1f))
+            Switch(checked = settings.lite, onCheckedChange = { on -> vm.saveSettings(settings.copy(lite = on)) })
+        }
+        Text(
+            if (settings.lite) "Ознакомление и вспоминание с самооценкой. DeepSeek нужен только для создания вопросов из документов."
+            else "Полный режим: библиотека книг, разведка, развёрнутые ответы с оценкой DeepSeek, обоснование по Фейнману.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodyMedium,
+        )
 
         HorizontalDivider()
         Text("Нагрузка", style = MaterialTheme.typography.titleMedium, color = AtlasColors.Accent)
