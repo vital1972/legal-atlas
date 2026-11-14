@@ -5,7 +5,8 @@ import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import java.time.temporal.IsoFields
 
-enum class Mode { REVIEW, NEW, AHEAD, PRETEST }
+/** READ и RECALL — ознакомление и вспоминание в лайт-режиме. */
+enum class Mode { REVIEW, NEW, AHEAD, PRETEST, READ, RECALL }
 
 /** feynman: после ответа попросить обоснование «почему». */
 data class PlannedItem(val item: Item, val mode: Mode, val feynman: Boolean = false)

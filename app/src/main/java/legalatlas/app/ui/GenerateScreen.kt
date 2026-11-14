@@ -158,7 +158,7 @@ private fun Preview(vm: AtlasViewModel, g: GenUi) {
             }
         }
         Button(
-            onClick = vm::addSelected,
+            onClick = { vm.addSelected() },
             enabled = g.selected.isNotEmpty(),
             modifier = Modifier.fillMaxWidth().padding(16.dp).height(56.dp),
         ) { Text("Добавить выбранные (${g.selected.size})") }

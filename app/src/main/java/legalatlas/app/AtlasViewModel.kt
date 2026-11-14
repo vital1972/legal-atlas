@@ -27,7 +27,10 @@ import legalatlas.core.Decks
 import legalatlas.core.Feynman
 import legalatlas.core.Formats
 import legalatlas.core.Fsrs
+import legalatlas.core.Accuracy
+import legalatlas.core.Ease
 import legalatlas.core.Item
+import legalatlas.core.Lite
 import legalatlas.core.Mode
 import legalatlas.core.PlannedItem
 import legalatlas.core.Planner
@@ -45,6 +48,31 @@ sealed interface Screen {
     data object Settings : Screen
     data object Generate : Screen
     data object Rework : Screen
+    /** Лайт-режим: ознакомление или вспоминание. */
+    data object Lite : Screen
+}
+
+/**
+ * Занятие в лайт-режиме. reading — ознакомление (вопрос сразу с ответом),
+ * иначе вспоминание: вопрос → «Показать ответ» → точность → (если полностью) лёгкость.
+ */
+data class LiteUi(
+    val reading: Boolean,
+    val title: String,
+    val deckId: String?,
+    val queue: List<Item>,
+    val index: Int = 0,
+    val revealed: Boolean = false,
+    /** Выбрано «Полностью»: осталось оценить лёгкость. */
+    val fullChosen: Boolean = false,
+    val done: Int = 0,
+    val remembered: Int = 0,
+    /** Когда вернётся предыдущий вопрос: «завтра», «через 5 дн.». */
+    val lastNote: String? = null,
+    val repeats: Map<String, Int> = emptyMap(),
+    val shownAt: Long = System.currentTimeMillis(),
+) {
+    val current: Item? get() = queue.getOrNull(index)
 }
 
 /** DOCUMENT — вопросы из документа; DEEPEN — новые вопросы к трудным при переработке. */
@@ -116,6 +144,9 @@ class AtlasViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _rework = MutableStateFlow<Rework.Analysis?>(null)
     val rework: StateFlow<Rework.Analysis?> = _rework.asStateFlow()
+
+    private val _lite = MutableStateFlow<LiteUi?>(null)
+    val lite: StateFlow<LiteUi?> = _lite.asStateFlow()
 
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
@@ -232,7 +263,7 @@ class AtlasViewModel(app: Application) : AndroidViewModel(app) {
                         _gen.update { it?.copy(progress = if (done < total) "Придумываю вопросы: ${done + 1} из $total…" else "Проверяю…") }
                     }
                 } else {
-                    generator.generate(plan, g.docTitle, g.focus, DocDeck.existingTopics(state)) { done, total ->
+                    generator.generate(plan, g.docTitle, g.focus, DocDeck.existingTopics(state), lite = state.settings.lite) { done, total ->
                         _gen.update { it?.copy(progress = if (done < total) "Читаю часть ${done + 1} из $total…" else "Проверяю цитаты…") }
                     }
                 }
@@ -250,13 +281,18 @@ class AtlasViewModel(app: Application) : AndroidViewModel(app) {
                             error = if (cands.isEmpty()) "Модель не предложила ни одного вопроса. Попробуйте другой фрагмент или уточните акцент." else null,
                         )
                     }
+                    // В лайт-режиме проверенные вопросы добавляются сразу, без просмотра списка.
+                    val ready = cands.filter { c -> c.recommended }
+                    if (state.settings.lite && g.mode == GenMode.DOCUMENT && ready.isNotEmpty()) {
+                        addSelected(skipped = cands.size - ready.size)
+                    }
                 },
                 onFailure = { e -> _gen.update { it?.copy(running = false, progress = null, error = e.message ?: "Ошибка") } },
             )
         }
     }
 
-    fun addSelected() {
+    fun addSelected(skipped: Int = 0) {
         val g = _gen.value ?: return
         val chosen = g.candidates.filter { it.item.id in g.selected }.map { it.item }
         if (chosen.isEmpty()) return
@@ -276,7 +312,9 @@ class AtlasViewModel(app: Application) : AndroidViewModel(app) {
             append("Добавлено вопросов: ${chosen.size}.")
             val intoExisting = chosen.count { c -> g.newTopics.none { it.id == c.topicId } }
             if (intoExisting > 0) append(" В существующие книги: $intoExisting.")
-            if (newBooks > 0) append(" Новых книг: $newBooks. Они закрыты: начните с разведки.")
+            if (_state.value.settings.lite) append(" Они ждут в «Ознакомиться».")
+            if (skipped > 0) append(" Не добавлено $skipped: цитата не найдена в документе или вопрос повторяет уже имеющийся.")
+            else if (newBooks > 0) append(" Новых книг: $newBooks. Они закрыты: начните с разведки.")
         }
     }
 
@@ -331,6 +369,7 @@ class AtlasViewModel(app: Application) : AndroidViewModel(app) {
 
     companion object {
         private const val MIN_DOC_CHARS = 300
+        private const val MAX_REPEATS = 2
     }
 
     fun deleteDeck(deckId: String) = update { s ->
@@ -451,6 +490,108 @@ class AtlasViewModel(app: Application) : AndroidViewModel(app) {
             getApplication<Application>().contentResolver.openOutputStream(uri)!!.use { it.write(exportJson().toByteArray()) }
         }.onSuccess { _message.value = "Отчёт сохранён" }
             .onFailure { _message.value = "Не удалось сохранить: ${it.message}" }
+    }
+
+    // ---------- Лайт-режим ----------
+
+    fun startReading(deckId: String? = null) {
+        val s = _state.value
+        val queue = Lite.unread(s, deckId)
+        if (queue.isEmpty()) {
+            _message.value = "Новых вопросов нет: со всеми вы уже ознакомились. Добавьте документ через «+»."
+            return
+        }
+        _lite.value = LiteUi(reading = true, revealed = true, title = deckId?.let { s.decks[it]?.deck?.title } ?: "Ознакомление", deckId = deckId, queue = queue)
+        _screen.value = Screen.Lite
+    }
+
+    fun startRecall(deckId: String? = null) {
+        val s = _state.value
+        val now = System.currentTimeMillis()
+        val queue = Lite.due(s, now, deckId)
+        if (queue.isEmpty()) {
+            val next = Lite.nextDue(s, now, deckId)
+            _message.value = if (next == null) "Вспоминать пока нечего: сначала ознакомьтесь с вопросами."
+            else "На сегодня всё. Следующее повторение ${Lite.inWords(now, next)}."
+            return
+        }
+        _lite.value = LiteUi(reading = false, title = deckId?.let { s.decks[it]?.deck?.title } ?: "Вспоминание", deckId = deckId, queue = queue)
+        _screen.value = Screen.Lite
+    }
+
+    fun liteReveal() = _lite.update { it?.copy(revealed = true) }
+
+    /** Ознакомление: «Понятно» (вспомнить завтра) или «Уже знаю» (длинный интервал). */
+    fun liteRead(alreadyKnown: Boolean) {
+        val ui = _lite.value ?: return
+        val item = ui.current ?: return
+        val now = System.currentTimeMillis()
+        update {
+            Progress.record(it, item, Mode.READ, Lite.readRating(alreadyKnown),
+                if (alreadyKnown) Confidence.SURE else Confidence.THINK, now - ui.shownAt, now)
+        }
+        val due = _state.value.cards[item.id]?.due
+        liteNext(ui.copy(done = ui.done + 1, lastNote = due?.let { "Вспомнить ${Lite.inWords(now, it)}" }))
+    }
+
+    fun liteAccuracy(accuracy: Accuracy) {
+        if (accuracy == Accuracy.FULL) _lite.update { it?.copy(fullChosen = true) }
+        else liteRate(accuracy, null)
+    }
+
+    fun liteEase(ease: Ease) = liteRate(Accuracy.FULL, ease)
+
+    fun liteBack() = _lite.update { it?.copy(fullChosen = false) }
+
+    private fun liteRate(accuracy: Accuracy, ease: Ease?) {
+        val ui = _lite.value ?: return
+        val item = ui.current ?: return
+        val now = System.currentTimeMillis()
+        val rating = Lite.rating(accuracy, ease)
+        val confidence = when (accuracy) {
+            Accuracy.FULL -> if (ease == Ease.HARD) Confidence.THINK else Confidence.SURE
+            Accuracy.PARTIAL -> Confidence.THINK
+            Accuracy.NONE -> Confidence.GUESS
+        }
+        update { Progress.record(it, item, Mode.RECALL, rating, confidence, now - ui.shownAt, now) }
+        val due = _state.value.cards[item.id]?.due
+        // Не вспомнил — вопрос ещё раз в конце этого же занятия (не больше двух повторов).
+        val repeat = rating == Rating.AGAIN && (ui.repeats[item.id] ?: 0) < MAX_REPEATS
+        liteNext(
+            ui.copy(
+                done = ui.done + 1,
+                remembered = ui.remembered + if (accuracy == Accuracy.FULL) 1 else 0,
+                queue = if (repeat) ui.queue + item else ui.queue,
+                repeats = if (repeat) ui.repeats + (item.id to (ui.repeats[item.id] ?: 0) + 1) else ui.repeats,
+                lastNote = when {
+                    repeat -> "Этот вопрос будет ещё раз в конце занятия"
+                    due != null -> "Следующий раз ${Lite.inWords(now, due)}"
+                    else -> null
+                },
+            ),
+        )
+    }
+
+    /** Пропустить без отметки: вопрос останется на потом. */
+    fun liteSkip() {
+        val ui = _lite.value ?: return
+        liteNext(ui.copy(lastNote = null))
+    }
+
+    fun liteFlag() {
+        val ui = _lite.value ?: return
+        val item = ui.current ?: return
+        update { it.copy(flaggedItems = it.flaggedItems + item.id) }
+        liteNext(ui.copy(lastNote = "Вопрос отмечен как неверный и больше не появится"))
+    }
+
+    private fun liteNext(ui: LiteUi) {
+        _lite.value = ui.copy(index = ui.index + 1, revealed = ui.reading, fullChosen = false, shownAt = System.currentTimeMillis())
+    }
+
+    fun liteClose() {
+        _lite.value = null
+        _screen.value = Screen.Home
     }
 
     // ---------- Сессия ----------

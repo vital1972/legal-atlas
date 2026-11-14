@@ -155,6 +155,7 @@ private fun ModeBadge(mode: Mode) {
         Mode.NEW -> "Новый вопрос" to AtlasColors.Accent
         Mode.AHEAD -> "Укрепление" to AtlasColors.Good
         Mode.PRETEST -> "Разведка: попробуйте угадать" to AtlasColors.Alert
+        Mode.READ, Mode.RECALL -> "Повторение" to AtlasColors.Good
     }
     Text(
         text,

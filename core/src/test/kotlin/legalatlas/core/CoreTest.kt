@@ -351,3 +351,52 @@ class BookmarksTest {
         assertEquals(2, later.tabs, "через год без повторений закладки выпадают")
     }
 }
+
+class LiteTest {
+    private val t0 = 1_760_000_000_000L
+    private val deck = Decks.parse(File("../examples/sample-deck.json").readText()).deck!!
+    private val state = Decks.import(AppState(), deck).state
+
+    @Test
+    fun accuracyAndEaseMapToFsrsRatings() {
+        assertEquals(Rating.AGAIN, Lite.rating(Accuracy.NONE))
+        assertEquals(Rating.HARD, Lite.rating(Accuracy.PARTIAL))
+        assertEquals(Rating.HARD, Lite.rating(Accuracy.FULL, Ease.HARD))
+        assertEquals(Rating.GOOD, Lite.rating(Accuracy.FULL, Ease.NORMAL))
+        assertEquals(Rating.EASY, Lite.rating(Accuracy.FULL, Ease.EASY))
+    }
+
+    @Test
+    fun readingSchedulesRecallForTomorrowAndKnownMuchLater() {
+        val item = Lite.unread(state).first()
+        val read = Progress.record(state, item, Mode.READ, Lite.readRating(false), Confidence.THINK, 0, t0)
+        val card = read.cards.getValue(item.id)
+        val days = (card.due - t0).toDouble() / Fsrs.DAY
+        assertTrue(days in 0.9..1.6, "after reading: $days days")
+        assertTrue(item !in Lite.unread(read))
+        assertTrue(Lite.due(read, t0).isEmpty())
+        assertEquals(listOf(item), Lite.due(read, card.due))
+
+        val known = Progress.record(state, item, Mode.READ, Lite.readRating(true), Confidence.SURE, 0, t0)
+        assertTrue(known.cards.getValue(item.id).due - t0 > 10 * Fsrs.DAY)
+    }
+
+    @Test
+    fun dueListsMostForgottenFirstAndSkipsFlagged() {
+        val (a, b) = Lite.unread(state).take(2)
+        var s = Progress.record(state, a, Mode.READ, Rating.HARD, Confidence.THINK, 0, t0)
+        s = Progress.record(s, b, Mode.READ, Rating.EASY, Confidence.THINK, 0, t0)
+        val later = t0 + 60 * Fsrs.DAY
+        assertEquals(listOf(a, b), Lite.due(s, later))
+        assertEquals(listOf(b), Lite.due(s.copy(flaggedItems = setOf(a.id)), later))
+        assertEquals(s.cards.getValue(a.id).due, Lite.nextDue(s, t0))
+    }
+
+    @Test
+    fun intervalsInWords() {
+        assertEquals("через 10 мин", Lite.inWords(t0, t0 + 10 * Fsrs.MINUTE))
+        assertEquals("завтра", Lite.inWords(t0, t0 + Fsrs.DAY))
+        assertEquals("через 5 дн.", Lite.inWords(t0, t0 + 5 * Fsrs.DAY))
+        assertEquals("через 2 мес.", Lite.inWords(t0, t0 + 60 * Fsrs.DAY))
+    }
+}
